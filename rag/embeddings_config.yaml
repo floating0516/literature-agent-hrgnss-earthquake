@@ -1,0 +1,28 @@
+# Placeholder RAG configuration
+
+storage:
+  markdown_first: true
+  chunks_file: rag/chunks.jsonl
+  vector_db: chroma_or_lancedb
+
+chunking:
+  target_tokens: 800
+  overlap_tokens: 120
+  preserve_sections: true
+
+metadata_fields:
+  - paper_id
+  - title
+  - authors
+  - year
+  - doi
+  - section
+  - source_file
+  - source_type
+  - tags
+
+retrieval:
+  require_source_metadata: true
+  allow_keyword_filter: true
+  allow_year_filter: true
+  allow_method_filter: true

@@ -1,0 +1,27 @@
+# Literature metadata and PDF source configuration
+
+metadata_sources:
+  - name: Semantic Scholar
+    url: https://www.semanticscholar.org/product/api
+    purpose: metadata, citation counts, abstracts, paper discovery
+  - name: OpenAlex
+    url: https://openalex.org/
+    purpose: open scholarly metadata and citation graph
+  - name: Crossref
+    url: https://www.crossref.org/documentation/retrieve-metadata/rest-api/
+    purpose: DOI metadata
+  - name: arXiv
+    url: https://info.arxiv.org/help/api/index.html
+    purpose: preprints and open PDFs
+  - name: Unpaywall
+    url: https://unpaywall.org/products/api
+    purpose: find legal open-access PDF locations
+  - name: NASA ADS
+    url: https://ui.adsabs.harvard.edu/help/api/
+    purpose: astronomy/geophysics-related literature discovery
+
+policy:
+  prefer_open_access_pdf: true
+  avoid_bulk_downloading_from_publishers: true
+  keep_metadata_when_pdf_unavailable: true
+  do_not_fabricate_missing_fields: true

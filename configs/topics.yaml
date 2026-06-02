@@ -1,0 +1,40 @@
+# Literature Agent topic configuration
+
+primary_topic:
+  id: hr_gnss_deep_learning_source_characterization
+  title: "HR-GNSS + deep learning for rapid large-earthquake source characterization"
+  title_zh: "基于高频 GNSS 与深度学习的大震快速震源表征"
+  description: >
+    Build a literature knowledge base for high-rate GNSS, earthquake early warning,
+    rapid magnitude estimation, finite-fault/source characterization, and deep learning methods.
+
+keywords:
+  core:
+    - "high-rate GNSS"
+    - "HR-GNSS"
+    - "earthquake early warning"
+    - "rapid earthquake magnitude estimation"
+    - "large earthquake source characterization"
+    - "GNSS displacement waveform"
+    - "peak ground displacement"
+    - "PGD scaling"
+    - "G-FAST"
+    - "finite fault inversion"
+    - "deep learning earthquake magnitude"
+  expansion:
+    - "geodetic earthquake early warning"
+    - "real-time GNSS"
+    - "GNSS seismology"
+    - "moment magnitude saturation"
+    - "rupture extent estimation"
+    - "station geometry"
+    - "multimodal earthquake early warning"
+    - "strong motion GNSS fusion"
+    - "physics-informed neural network earthquake"
+
+screening:
+  default_paper_count: 50
+  mvp_keep_count: 10
+  mvp_deep_read_count: 3
+  priority_year_start: 2000
+  relevance_threshold_for_fulltext: 4

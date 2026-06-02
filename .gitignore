@@ -1,0 +1,19 @@
+# Local / generated binary paper files
+papers/raw_pdf/
+reference_nature_agent/*.pdf
+
+# Parsed full text derived from PDFs; keep locally, do not publish by default
+papers/parsed_md/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# macOS / editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.log
