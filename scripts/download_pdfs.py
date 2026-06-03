@@ -147,9 +147,9 @@ def download_pdf(record: dict[str, Any], config: DownloadConfig) -> dict[str, An
 
     config.pdf_dir.mkdir(parents=True, exist_ok=True)
     base_pdf_path = config.pdf_dir / make_pdf_filename(record)
-    if base_pdf_path.exists() and not config.overwrite:
+    if base_pdf_path.exists():
         pdf_path = target_pdf_path(record, config.pdf_dir)
-        if pdf_path == base_pdf_path:
+        if pdf_path.exists() and not config.overwrite:
             return result_for(record, status="skipped_existing", pdf_path=pdf_path, note="PDF already exists")
     else:
         pdf_path = base_pdf_path

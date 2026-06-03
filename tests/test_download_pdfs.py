@@ -132,6 +132,55 @@ class DownloadPdfPureFunctionTests(unittest.TestCase):
 
             self.assertNotEqual(first_path, second_path)
 
+    def test_download_pdf_skips_existing_suffixed_target_when_overwrite_disabled(self):
+        record_one = {
+            "year": 2024,
+            "title": "Same Title",
+            "doi": "10.1000/alpha",
+            "pdf_url": "https://example.org/alpha.pdf",
+        }
+        record_two = {
+            "year": 2024,
+            "title": "Same Title",
+            "doi": "10.1000/beta",
+            "pdf_url": "https://example.org/beta.pdf",
+        }
+
+        class FakeResponse:
+            def __init__(self, *, headers, data):
+                self.headers = headers
+                self._data = data
+
+            def read(self):
+                return self._data
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            config = DownloadConfig(pdf_dir=output_dir, overwrite=False)
+            base_path = output_dir / make_pdf_filename(record_two)
+            base_path.write_bytes(b"%PDF-base\n")
+            suffix_path = target_pdf_path(record_two, output_dir)
+            suffix_path.write_bytes(b"%PDF-existing-suffix\n")
+
+            with patch(
+                "scripts.download_pdfs.urllib.request.urlopen",
+                return_value=FakeResponse(
+                    headers={"Content-Type": "application/pdf"},
+                    data=b"%PDF-new-download\n",
+                ),
+            ):
+                result = download_pdf(record_two, config)
+
+            self.assertEqual(result["download_status"], "skipped_existing")
+            self.assertEqual(result["downloaded_pdf"], f"papers/raw_pdf/{suffix_path.name}")
+            self.assertEqual(suffix_path.read_bytes(), b"%PDF-existing-suffix\n")
+
 
 if __name__ == "__main__":
     unittest.main()
