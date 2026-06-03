@@ -269,7 +269,10 @@ class DownloadPdfPureFunctionTests(unittest.TestCase):
             expected_path = output_dir / make_pdf_filename(record)
             self.assertEqual(result["download_status"], "dry_run")
             self.assertEqual(result["downloaded_pdf"], str(expected_path))
-            self.assertIn("Dry run", result["download_note"])
+            self.assertEqual(
+                result["download_note"],
+                "Dry run; skipped network request and PDF file creation.",
+            )
             self.assertFalse(expected_path.exists())
             self.assertFalse(output_dir.exists())
             mock_urlopen.assert_not_called()
@@ -311,8 +314,13 @@ class DownloadPdfPureFunctionTests(unittest.TestCase):
             self.assertEqual(results[1]["download_status"], "manual_required")
             self.assertEqual(load_jsonl(output_path), results)
             log_text = log_path.read_text(encoding="utf-8")
+            self.assertIn("- Dry run：1", log_text)
             self.assertIn("dry_run", log_text)
             self.assertIn("manual_required", log_text)
+            self.assertIn(
+                "Dry run; skipped network request and PDF file creation.",
+                log_text,
+            )
             self.assertFalse(pdf_dir.exists())
             self.assertFalse((pdf_dir / "2024_dry_run_me.pdf").exists())
             mock_urlopen.assert_not_called()

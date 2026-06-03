@@ -312,7 +312,7 @@ def download_pdf(record: dict[str, Any], config: DownloadConfig) -> dict[str, An
             record,
             status="dry_run",
             pdf_path=pdf_path,
-            note="Dry run: skipped PDF download and file write",
+            note="Dry run; skipped network request and PDF file creation.",
         )
 
     config.pdf_dir.mkdir(parents=True, exist_ok=True)
@@ -344,6 +344,7 @@ def write_markdown_log(log_path: Path, results: list[dict[str, Any]], *, input_p
     log_path.parent.mkdir(parents=True, exist_ok=True)
     downloaded = sum(1 for item in results if item.get("download_status") == "downloaded")
     skipped_existing = sum(1 for item in results if item.get("download_status") == "skipped_existing")
+    dry_run = sum(1 for item in results if item.get("download_status") == "dry_run")
     manual_required = sum(1 for item in results if item.get("download_status") == "manual_required")
     failed = sum(1 for item in results if item.get("download_status") == "failed")
 
@@ -360,6 +361,7 @@ def write_markdown_log(log_path: Path, results: list[dict[str, Any]], *, input_p
         f"- 日志文件：{display_path(log_path)}",
         f"- 下载成功：{downloaded}",
         f"- 已存在跳过：{skipped_existing}",
+        f"- Dry run：{dry_run}",
         f"- 需要人工处理：{manual_required}",
         f"- 下载失败：{failed}",
         "",
