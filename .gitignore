@@ -9,6 +9,9 @@ papers/parsed_md/
 __pycache__/
 *.py[cod]
 
+# Local CodeGraph index
+.codegraph/
+
 # macOS / editor files
 .DS_Store
 .vscode/
