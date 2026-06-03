@@ -4,6 +4,8 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.request
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -74,6 +76,16 @@ class LocalHttpServer:
         host, port = self._server.server_address
         with socket.create_connection((host, port), timeout=5):
             return
+
+
+@contextmanager
+def no_proxy_url_opener():
+    previous_opener = urllib.request._opener
+    urllib.request._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        yield
+    finally:
+        urllib.request._opener = previous_opener
 
 
 class DownloadPdfPureFunctionTests(unittest.TestCase):
@@ -150,7 +162,7 @@ class DownloadPdfPureFunctionTests(unittest.TestCase):
                 }
             ) as server:
                 config = DownloadConfig(pdf_dir=output_dir)
-                with patch("scripts.download_pdfs.urllib.request.getproxies", return_value={}):
+                with no_proxy_url_opener():
                     result = download_pdf(
                         {**record, "pdf_url": server.url("/not-a-pdf")},
                         config,
@@ -181,7 +193,7 @@ class DownloadPdfPureFunctionTests(unittest.TestCase):
                 }
             ) as server:
                 config = DownloadConfig(pdf_dir=output_dir)
-                with patch("scripts.download_pdfs.urllib.request.getproxies", return_value={}):
+                with no_proxy_url_opener():
                     result = download_pdf(
                         {**record, "pdf_url": server.url("/paper.pdf")},
                         config,
@@ -231,7 +243,7 @@ class DownloadPdfPureFunctionTests(unittest.TestCase):
                     log_path=log_path,
                     pdf_dir=pdf_dir,
                 )
-                with patch("scripts.download_pdfs.urllib.request.getproxies", return_value={}):
+                with no_proxy_url_opener():
                     results = run(config)
 
             self.assertEqual(len(results), 2)
