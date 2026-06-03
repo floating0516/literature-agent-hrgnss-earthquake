@@ -16,6 +16,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = BASE_DIR / "papers" / "selected_papers.jsonl"
@@ -100,6 +101,34 @@ def make_pdf_filename(record: dict[str, Any]) -> str:
 
 
 
+def unique_record_suffix(record: dict[str, Any]) -> str:
+    for key in ("doi", "openalex_id", "paper_id"):
+        slug = slugify(record.get(key))
+        if slug:
+            return slug[:24]
+    return ""
+
+
+
+def target_pdf_path(record: dict[str, Any], output_dir: Path) -> Path:
+    base_path = output_dir / make_pdf_filename(record)
+    if not base_path.exists():
+        return base_path
+
+    suffix = unique_record_suffix(record)
+    if not suffix:
+        return base_path
+
+    return base_path.with_name(f"{base_path.stem}_{suffix}{base_path.suffix}")
+
+
+
+def is_pdf_response(content_type: str | None, data: bytes) -> bool:
+    normalized_type = (content_type or "").lower()
+    return "pdf" in normalized_type or data.startswith(b"%PDF")
+
+
+
 def result_for(record: dict[str, Any], *, status: str, pdf_path: Path | None = None, note: str | None = None) -> dict[str, Any]:
     result = dict(record)
     result["selected_pdf_url"] = choose_pdf_url(record)
@@ -117,10 +146,13 @@ def download_pdf(record: dict[str, Any], config: DownloadConfig) -> dict[str, An
         return result_for(record, status="manual_required", note="No open PDF URL in metadata")
 
     config.pdf_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = config.pdf_dir / make_pdf_filename(record)
-
-    if pdf_path.exists() and not config.overwrite:
-        return result_for(record, status="skipped_existing", pdf_path=pdf_path, note="PDF already exists")
+    base_pdf_path = config.pdf_dir / make_pdf_filename(record)
+    if base_pdf_path.exists() and not config.overwrite:
+        pdf_path = target_pdf_path(record, config.pdf_dir)
+        if pdf_path == base_pdf_path:
+            return result_for(record, status="skipped_existing", pdf_path=pdf_path, note="PDF already exists")
+    else:
+        pdf_path = base_pdf_path
 
     request = urllib.request.Request(
         pdf_url,
@@ -130,9 +162,17 @@ def download_pdf(record: dict[str, Any], config: DownloadConfig) -> dict[str, An
     try:
         with urllib.request.urlopen(request, timeout=config.timeout) as response:
             data = response.read()
+            content_type = response.headers.get("Content-Type")
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
+        return result_for(record, status="failed", note=str(exc))
+
+    if not is_pdf_response(content_type, data):
+        return result_for(record, status="failed", note=f"Non-PDF response: {content_type or 'unknown content type'}")
+
+    try:
         pdf_path.write_bytes(data)
-    except Exception as exc:  # noqa: BLE001
-        return result_for(record, status="download_failed", note=str(exc))
+    except OSError as exc:
+        return result_for(record, status="failed", note=str(exc))
 
     return result_for(record, status="downloaded", pdf_path=pdf_path)
 
@@ -143,7 +183,7 @@ def write_markdown_log(log_path: Path, results: list[dict[str, Any]]) -> None:
     downloaded = sum(1 for item in results if item.get("download_status") == "downloaded")
     skipped_existing = sum(1 for item in results if item.get("download_status") == "skipped_existing")
     manual_required = sum(1 for item in results if item.get("download_status") == "manual_required")
-    failed = sum(1 for item in results if item.get("download_status") == "download_failed")
+    failed = sum(1 for item in results if item.get("download_status") == "failed")
 
     lines = [
         "# PDF 下载记录",
