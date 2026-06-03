@@ -129,11 +129,21 @@ def is_pdf_response(content_type: str | None, data: bytes) -> bool:
 
 
 
+def display_path(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        return str(path.relative_to(BASE_DIR))
+    except ValueError:
+        return str(path)
+
+
+
 def result_for(record: dict[str, Any], *, status: str, pdf_path: Path | None = None, note: str | None = None) -> dict[str, Any]:
     result = dict(record)
     result["selected_pdf_url"] = choose_pdf_url(record)
     result["download_status"] = status
-    result["downloaded_pdf"] = f"papers/raw_pdf/{pdf_path.name}" if pdf_path else None
+    result["downloaded_pdf"] = display_path(pdf_path)
     if note is not None:
         result["download_note"] = note
     return result
@@ -178,7 +188,7 @@ def download_pdf(record: dict[str, Any], config: DownloadConfig) -> dict[str, An
 
 
 
-def write_markdown_log(log_path: Path, results: list[dict[str, Any]]) -> None:
+def write_markdown_log(log_path: Path, results: list[dict[str, Any]], *, input_path: Path | None = None, output_path: Path | None = None, pdf_dir: Path | None = None) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     downloaded = sum(1 for item in results if item.get("download_status") == "downloaded")
     skipped_existing = sum(1 for item in results if item.get("download_status") == "skipped_existing")
@@ -192,6 +202,10 @@ def write_markdown_log(log_path: Path, results: list[dict[str, Any]]) -> None:
         "",
         "## 总览",
         "",
+        f"- 输入文件：{display_path(input_path) or ''}",
+        f"- PDF 输出目录：{display_path(pdf_dir) or ''}",
+        f"- 结果文件：{display_path(output_path) or ''}",
+        f"- 日志文件：{display_path(log_path)}",
         f"- 下载成功：{downloaded}",
         f"- 已存在跳过：{skipped_existing}",
         f"- 需要人工处理：{manual_required}",
@@ -220,7 +234,13 @@ def run(config: DownloadConfig) -> list[dict[str, Any]]:
     records = load_jsonl(config.input_path)
     results = [download_pdf(record, config) for record in records]
     write_jsonl(config.output_path, results)
-    write_markdown_log(config.log_path, results)
+    write_markdown_log(
+        config.log_path,
+        results,
+        input_path=config.input_path,
+        output_path=config.output_path,
+        pdf_dir=config.pdf_dir,
+    )
     return results
 
 
