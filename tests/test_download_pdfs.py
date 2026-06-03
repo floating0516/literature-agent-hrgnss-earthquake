@@ -1,3 +1,4 @@
+import http.client
 import json
 import socket
 import sys
@@ -218,6 +219,38 @@ class DownloadPdfPureFunctionTests(unittest.TestCase):
             self.assertEqual(result["download_status"], "failed")
             self.assertIsNone(result["downloaded_pdf"])
             self.assertIn("Non-PDF response", result["download_note"])
+            self.assertEqual(list(output_dir.iterdir()), [])
+
+    def test_download_pdf_handles_incomplete_read_as_failed(self):
+        record = {
+            "title": "Interrupted download",
+            "year": 2024,
+            "doi": "10.1000/interrupted",
+            "pdf_url": "https://example.org/interrupted.pdf",
+        }
+
+        class InterruptedResponse:
+            headers = {"Content-Type": "application/pdf"}
+
+            def read(self):
+                raise http.client.IncompleteRead(b"%PDF-partial", 1024)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "raw_pdf"
+            config = DownloadConfig(pdf_dir=output_dir)
+
+            with patch("scripts.download_pdfs.urllib.request.urlopen", return_value=InterruptedResponse()):
+                result = download_pdf(record, config)
+
+            self.assertEqual(result["download_status"], "failed")
+            self.assertIsNone(result["downloaded_pdf"])
+            self.assertIn("IncompleteRead", result["download_note"])
             self.assertEqual(list(output_dir.iterdir()), [])
 
     def test_download_pdf_saves_pdf_bytes(self):
@@ -471,6 +504,28 @@ class DownloadPdfPureFunctionTests(unittest.TestCase):
             second_path = target_pdf_path(record_two, output_dir)
 
             self.assertNotEqual(first_path, second_path)
+
+    def test_download_pdf_skips_existing_base_target_when_overwrite_disabled(self):
+        record = {
+            "year": 2024,
+            "title": "Already Downloaded",
+            "doi": "10.1000/already-downloaded",
+            "pdf_url": "https://example.org/already-downloaded.pdf",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            config = DownloadConfig(pdf_dir=output_dir, overwrite=False)
+            base_path = output_dir / make_pdf_filename(record)
+            base_path.write_bytes(b"%PDF-existing\n")
+
+            with patch("scripts.download_pdfs.urllib.request.urlopen") as mock_urlopen:
+                result = download_pdf(record, config)
+
+            self.assertEqual(result["download_status"], "skipped_existing")
+            self.assertEqual(result["downloaded_pdf"], str(base_path))
+            self.assertEqual(base_path.read_bytes(), b"%PDF-existing\n")
+            mock_urlopen.assert_not_called()
 
     def test_download_pdf_skips_existing_suffixed_target_when_overwrite_disabled(self):
         record_one = {

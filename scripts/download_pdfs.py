@@ -10,6 +10,7 @@ Compliance boundary:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import re
 import time
@@ -300,12 +301,12 @@ def download_pdf(record: dict[str, Any], config: DownloadConfig) -> dict[str, An
         return result_for(record, status="manual_required", note="No open PDF URL in metadata")
 
     base_pdf_path = config.pdf_dir / make_pdf_filename(record)
-    if base_pdf_path.exists():
+    if base_pdf_path.exists() and not config.overwrite:
         pdf_path = target_pdf_path(record, config.pdf_dir)
-        if pdf_path.exists() and not config.overwrite:
+        if pdf_path.exists():
             return result_for(record, status="skipped_existing", pdf_path=pdf_path, note="PDF already exists")
-    else:
-        pdf_path = base_pdf_path
+        return result_for(record, status="skipped_existing", pdf_path=base_pdf_path, note="PDF already exists")
+    pdf_path = base_pdf_path
 
     if config.dry_run:
         return result_for(
@@ -325,7 +326,7 @@ def download_pdf(record: dict[str, Any], config: DownloadConfig) -> dict[str, An
         with urllib.request.urlopen(request, timeout=config.timeout) as response:
             data = response.read()
             content_type = response.headers.get("Content-Type")
-    except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError, http.client.IncompleteRead) as exc:
         return result_for(record, status="failed", note=str(exc))
 
     if not is_pdf_response(content_type, data):
