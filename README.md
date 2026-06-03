@@ -139,7 +139,7 @@ papers/pdf_download_log.md
 python3 scripts/download_pdfs.py --dry-run
 ```
 
-合规说明：本项目不绕过 paywall；闭源论文、没有开放 PDF URL 的论文，或只能通过学校/机构权限访问的论文，都会记录为 `manual_required`。用户可在合法前提下手动下载后放入：
+合规说明：本项目不绕过 paywall。`manual_required` 表示元数据中没有可用开放 PDF URL，或现有元数据无法定位到开放 PDF，需要人工判断或补充；`failed` 表示已经有候选 URL，但远端拒绝、超时、返回非 PDF / 登录页等，需要人工检查。对于只能通过学校/机构权限合法访问的 PDF，请由用户自行下载后放入：
 
 ```text
 papers/raw_pdf/
