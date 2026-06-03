@@ -39,6 +39,7 @@ class DownloadConfig:
     sleep_seconds: float = 1.0
     user_agent: str = DEFAULT_USER_AGENT
     overwrite: bool = False
+    enabled: bool = True
 
 
 def parse_scalar(value: str) -> Any:
@@ -64,6 +65,34 @@ def parse_scalar(value: str) -> Any:
 
 
 
+def _line_indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+
+def _iter_pdf_download_block(lines: list[str]) -> list[tuple[int, str]]:
+    for index, raw_line in enumerate(lines):
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped == "pdf_download:":
+            root_indent = _line_indent(line)
+            block: list[tuple[int, str]] = []
+            for nested_raw_line in lines[index + 1 :]:
+                nested_line = nested_raw_line.rstrip()
+                nested_stripped = nested_line.strip()
+                if not nested_stripped or nested_stripped.startswith("#"):
+                    continue
+                nested_indent = _line_indent(nested_line)
+                if nested_indent <= root_indent:
+                    break
+                block.append((nested_indent, nested_stripped))
+            return block
+    return []
+
+
+
 def load_download_policy(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     policy: dict[str, Any] = {
         "enabled": True,
@@ -78,42 +107,73 @@ def load_download_policy(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     if not path.exists():
         return policy
 
-    stack: list[tuple[int, Any]] = [(-1, {"pdf_download": {}})]
-    with path.open("r", encoding="utf-8") as handle:
-        for raw_line in handle:
-            line = raw_line.rstrip()
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or stripped.startswith("- "):
+    block = _iter_pdf_download_block(path.read_text(encoding="utf-8").splitlines())
+    if not block:
+        return policy
+
+    index = 0
+    allowed_scalar_keys = {"enabled", "sleep_seconds", "timeout_seconds", "user_agent", "strategy"}
+    while index < len(block):
+        indent, stripped = block[index]
+        if stripped.startswith("- "):
+            raise ValueError(f"Unsupported list item in pdf_download block: {stripped}")
+        if ":" not in stripped:
+            raise ValueError(f"Unsupported pdf_download line: {stripped}")
+
+        key, raw_value = stripped.split(":", 1)
+        key = key.strip()
+        raw_value = raw_value.strip()
+
+        if indent != 2:
+            raise ValueError(f"Unsupported nesting in pdf_download block near: {key}")
+
+        if raw_value:
+            if key in allowed_scalar_keys:
+                policy[key] = parse_scalar(raw_value)
+                index += 1
                 continue
+            raise ValueError(f"Unsupported pdf_download field: {key}")
 
-            indent = len(line) - len(line.lstrip(" "))
-            while len(stack) > 1 and indent <= stack[-1][0]:
-                stack.pop()
+        if key == "policy_notes":
+            index += 1
+            while index < len(block) and block[index][0] > indent:
+                nested_stripped = block[index][1]
+                if not nested_stripped.startswith("- "):
+                    raise ValueError("policy_notes only supports list items")
+                index += 1
+            continue
 
-            if ":" not in stripped:
-                continue
+        if key != "publisher_adapters":
+            raise ValueError(f"Unsupported nested pdf_download field: {key}")
 
-            key, raw_value = stripped.split(":", 1)
-            key = key.strip()
-            raw_value = raw_value.strip()
-            parent = stack[-1][1]
-            if raw_value:
-                parent[key] = parse_scalar(raw_value)
-            else:
-                parent[key] = {}
-                stack.append((indent, parent[key]))
+        index += 1
+        while index < len(block) and block[index][0] > indent:
+            adapter_indent, adapter_line = block[index]
+            if adapter_line.startswith("- "):
+                raise ValueError(f"Unsupported list item under publisher_adapters: {adapter_line}")
+            if adapter_indent != 4 or not adapter_line.endswith(":"):
+                raise ValueError(f"Unsupported publisher_adapters structure: {adapter_line}")
 
-    loaded = stack[0][1].get("pdf_download", {})
-    for key in ("enabled", "sleep_seconds", "timeout_seconds", "user_agent"):
-        if key in loaded:
-            policy[key] = loaded[key]
+            adapter_name = adapter_line[:-1].strip()
+            if adapter_name not in policy["publisher_adapters"]:
+                raise ValueError(f"Unsupported publisher adapter: {adapter_name}")
 
-    adapters = loaded.get("publisher_adapters", {})
-    if isinstance(adapters, dict):
-        for name in ("sciencedirect", "informs"):
-            adapter = adapters.get(name)
-            if isinstance(adapter, dict) and "enabled" in adapter:
-                policy["publisher_adapters"][name]["enabled"] = bool(adapter["enabled"])
+            index += 1
+            while index < len(block) and block[index][0] > adapter_indent:
+                field_indent, field_line = block[index]
+                if field_line.startswith("- "):
+                    raise ValueError(f"Unsupported list item under publisher adapter {adapter_name}: {field_line}")
+                if field_indent != 6 or ":" not in field_line:
+                    raise ValueError(f"Unsupported publisher adapter structure: {field_line}")
+
+                field_key, field_raw_value = field_line.split(":", 1)
+                field_key = field_key.strip()
+                field_raw_value = field_raw_value.strip()
+                if field_key == "enabled" and field_raw_value:
+                    policy["publisher_adapters"][adapter_name]["enabled"] = bool(parse_scalar(field_raw_value))
+                elif field_key not in {"reference_project", "note"}:
+                    raise ValueError(f"Unsupported publisher adapter field: {field_key}")
+                index += 1
 
     return policy
 
@@ -314,6 +374,18 @@ def write_markdown_log(log_path: Path, results: list[dict[str, Any]], *, input_p
 
 
 def run(config: DownloadConfig) -> list[dict[str, Any]]:
+    if not config.enabled:
+        results: list[dict[str, Any]] = []
+        write_jsonl(config.output_path, results)
+        write_markdown_log(
+            config.log_path,
+            results,
+            input_path=config.input_path,
+            output_path=config.output_path,
+            pdf_dir=config.pdf_dir,
+        )
+        return results
+
     records = load_jsonl(config.input_path)
     results: list[dict[str, Any]] = []
     for index, record in enumerate(records):
@@ -359,6 +431,7 @@ def main() -> None:
         sleep_seconds=args.sleep if args.sleep is not None else float(policy["sleep_seconds"]),
         user_agent=args.user_agent if args.user_agent is not None else str(policy["user_agent"]),
         overwrite=args.overwrite,
+        enabled=bool(policy["enabled"]),
     )
     results = run(config)
     print(f"Processed {len(results)} records")

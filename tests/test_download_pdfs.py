@@ -20,6 +20,7 @@ from scripts.download_pdfs import (
     download_pdf,
     load_download_policy,
     load_jsonl,
+    main,
     make_pdf_filename,
     run,
     target_pdf_path,
@@ -109,11 +110,25 @@ class DownloadPolicyTests(unittest.TestCase):
 
             policy = load_download_policy(config_path)
 
+        self.assertIs(policy["enabled"], True)
         self.assertEqual(policy["sleep_seconds"], 2.5)
         self.assertEqual(policy["timeout_seconds"], 45)
         self.assertEqual(policy["user_agent"], "AI-Agent-Reading test")
         self.assertFalse(policy["publisher_adapters"]["sciencedirect"]["enabled"])
         self.assertFalse(policy["publisher_adapters"]["informs"]["enabled"])
+
+    def test_load_download_policy_rejects_unknown_list_under_pdf_download(self):
+        yaml_text = """pdf_download:
+  unsupported_items:
+    - item
+"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "sources.yaml"
+            config_path.write_text(yaml_text, encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "unsupported_items"):
+                load_download_policy(config_path)
 
 
 class DownloadPdfPureFunctionTests(unittest.TestCase):
@@ -285,6 +300,77 @@ class DownloadPdfPureFunctionTests(unittest.TestCase):
             self.assertIn(f"- 结果文件：{output_path}", log_text)
             self.assertIn(f"- 日志文件：{log_path}", log_text)
             self.assertIn(str(pdf_dir / "2024_download_me.pdf"), log_text)
+
+    def test_run_returns_empty_results_without_downloading_when_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            input_path = tmp_path / "selected_papers.jsonl"
+            output_path = tmp_path / "results" / "download_results.jsonl"
+            log_path = tmp_path / "logs" / "pdf_download_log.md"
+            pdf_dir = tmp_path / "pdfs"
+            records = [
+                {
+                    "title": "Should not download",
+                    "year": 2024,
+                    "doi": "10.1000/disabled",
+                    "pdf_url": "https://example.org/disabled.pdf",
+                }
+            ]
+            write_jsonl(input_path, records)
+            config = DownloadConfig(
+                input_path=input_path,
+                output_path=output_path,
+                log_path=log_path,
+                pdf_dir=pdf_dir,
+                enabled=False,
+            )
+
+            with patch("scripts.download_pdfs.download_pdf") as mock_download:
+                results = run(config)
+
+            self.assertEqual(results, [])
+            mock_download.assert_not_called()
+            self.assertEqual(load_jsonl(output_path), [])
+            self.assertFalse(pdf_dir.exists())
+            log_text = log_path.read_text(encoding="utf-8")
+            self.assertIn("- 下载成功：0", log_text)
+            self.assertIn("- 需要人工处理：0", log_text)
+            self.assertIn("- 下载失败：0", log_text)
+
+    def test_main_uses_policy_enabled_flag_for_run_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "sources.yaml"
+            config_path.write_text("pdf_download:\n  enabled: false\n", encoding="utf-8")
+            output_path = Path(tmp) / "results.jsonl"
+            log_path = Path(tmp) / "log.md"
+            pdf_dir = Path(tmp) / "pdfs"
+            input_path = Path(tmp) / "selected_papers.jsonl"
+            input_path.write_text("", encoding="utf-8")
+
+            captured = {}
+
+            def fake_run(config):
+                captured["config"] = config
+                return []
+
+            argv = [
+                "download_pdfs.py",
+                "--config",
+                str(config_path),
+                "--input",
+                str(input_path),
+                "--output",
+                str(output_path),
+                "--log",
+                str(log_path),
+                "--pdf-dir",
+                str(pdf_dir),
+            ]
+
+            with patch.object(sys, "argv", argv), patch("scripts.download_pdfs.run", side_effect=fake_run):
+                main()
+
+            self.assertIs(captured["config"].enabled, False)
 
     def test_same_year_title_different_doi_need_distinct_target_paths(self):
         record_one = {
