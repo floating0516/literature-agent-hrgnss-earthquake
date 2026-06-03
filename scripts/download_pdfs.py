@@ -21,7 +21,7 @@ from urllib.error import HTTPError, URLError
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = BASE_DIR / "papers" / "selected_papers.jsonl"
-DEFAULT_OUTPUT = BASE_DIR / "papers" / "download_results.jsonl"
+DEFAULT_OUTPUT = BASE_DIR / "papers" / "pdf_download_results.jsonl"
 DEFAULT_LOG = BASE_DIR / "papers" / "pdf_download_log.md"
 DEFAULT_PDF_DIR = BASE_DIR / "papers" / "raw_pdf"
 DEFAULT_CONFIG = BASE_DIR / "configs" / "sources.yaml"
@@ -40,6 +40,7 @@ class DownloadConfig:
     user_agent: str = DEFAULT_USER_AGENT
     overwrite: bool = False
     enabled: bool = True
+    dry_run: bool = False
 
 
 def parse_scalar(value: str) -> Any:
@@ -298,7 +299,6 @@ def download_pdf(record: dict[str, Any], config: DownloadConfig) -> dict[str, An
     if not pdf_url:
         return result_for(record, status="manual_required", note="No open PDF URL in metadata")
 
-    config.pdf_dir.mkdir(parents=True, exist_ok=True)
     base_pdf_path = config.pdf_dir / make_pdf_filename(record)
     if base_pdf_path.exists():
         pdf_path = target_pdf_path(record, config.pdf_dir)
@@ -307,6 +307,15 @@ def download_pdf(record: dict[str, Any], config: DownloadConfig) -> dict[str, An
     else:
         pdf_path = base_pdf_path
 
+    if config.dry_run:
+        return result_for(
+            record,
+            status="dry_run",
+            pdf_path=pdf_path,
+            note="Dry run: skipped PDF download and file write",
+        )
+
+    config.pdf_dir.mkdir(parents=True, exist_ok=True)
     request = urllib.request.Request(
         pdf_url,
         headers={"User-Agent": config.user_agent},
@@ -415,6 +424,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=None, help="HTTP timeout in seconds.")
     parser.add_argument("--user-agent", default=None, help="HTTP User-Agent header.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing PDFs.")
+    parser.add_argument("--dry-run", action="store_true", help="Resolve PDF targets and write results/log without downloading PDFs.")
     return parser.parse_args()
 
 
@@ -432,6 +442,7 @@ def main() -> None:
         user_agent=args.user_agent if args.user_agent is not None else str(policy["user_agent"]),
         overwrite=args.overwrite,
         enabled=bool(policy["enabled"]),
+        dry_run=args.dry_run,
     )
     results = run(config)
     print(f"Processed {len(results)} records")

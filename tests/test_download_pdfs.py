@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.download_pdfs import (
+    DEFAULT_OUTPUT,
     DownloadConfig,
     choose_pdf_url,
     download_pdf,
@@ -91,6 +92,9 @@ def no_proxy_url_opener():
 
 
 class DownloadPolicyTests(unittest.TestCase):
+    def test_default_output_points_to_pdf_download_results_jsonl(self):
+        self.assertEqual(DEFAULT_OUTPUT, PROJECT_ROOT / "papers" / "pdf_download_results.jsonl")
+
     def test_load_download_policy_reads_simple_yaml_subset(self):
         yaml_text = """pdf_download:
   enabled: true
@@ -247,6 +251,72 @@ class DownloadPdfPureFunctionTests(unittest.TestCase):
             self.assertEqual(result["downloaded_pdf"], str(expected_path))
             self.assertEqual(expected_path.read_bytes(), pdf_bytes)
 
+    def test_download_pdf_dry_run_returns_status_without_creating_pdf(self):
+        record = {
+            "title": "Dry run me",
+            "year": 2024,
+            "doi": "10.1000/dry-run",
+            "pdf_url": "https://example.org/dry-run.pdf",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "raw_pdf"
+            config = DownloadConfig(pdf_dir=output_dir, dry_run=True)
+
+            with patch("scripts.download_pdfs.urllib.request.urlopen") as mock_urlopen:
+                result = download_pdf(record, config)
+
+            expected_path = output_dir / make_pdf_filename(record)
+            self.assertEqual(result["download_status"], "dry_run")
+            self.assertEqual(result["downloaded_pdf"], str(expected_path))
+            self.assertIn("Dry run", result["download_note"])
+            self.assertFalse(expected_path.exists())
+            self.assertFalse(output_dir.exists())
+            mock_urlopen.assert_not_called()
+
+    def test_run_dry_run_writes_results_and_log_without_creating_pdf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            input_path = tmp_path / "selected_papers.jsonl"
+            output_path = tmp_path / "results" / "pdf_download_results.jsonl"
+            log_path = tmp_path / "logs" / "pdf_download_log.md"
+            pdf_dir = tmp_path / "pdfs"
+            records = [
+                {
+                    "title": "Dry run me",
+                    "year": 2024,
+                    "doi": "10.1000/dry-run",
+                    "pdf_url": "https://example.org/dry-run.pdf",
+                },
+                {
+                    "title": "Needs manual handling",
+                    "year": 2023,
+                    "doi": "10.1000/manual",
+                },
+            ]
+            write_jsonl(input_path, records)
+            config = DownloadConfig(
+                input_path=input_path,
+                output_path=output_path,
+                log_path=log_path,
+                pdf_dir=pdf_dir,
+                dry_run=True,
+            )
+
+            with patch("scripts.download_pdfs.urllib.request.urlopen") as mock_urlopen:
+                results = run(config)
+
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0]["download_status"], "dry_run")
+            self.assertEqual(results[1]["download_status"], "manual_required")
+            self.assertEqual(load_jsonl(output_path), results)
+            log_text = log_path.read_text(encoding="utf-8")
+            self.assertIn("dry_run", log_text)
+            self.assertIn("manual_required", log_text)
+            self.assertFalse(pdf_dir.exists())
+            self.assertFalse((pdf_dir / "2024_dry_run_me.pdf").exists())
+            mock_urlopen.assert_not_called()
+
     def test_run_writes_results_and_markdown_log(self):
         pdf_bytes = b"%PDF-1.7\nrun test pdf\n"
 
@@ -365,12 +435,14 @@ class DownloadPdfPureFunctionTests(unittest.TestCase):
                 str(log_path),
                 "--pdf-dir",
                 str(pdf_dir),
+                "--dry-run",
             ]
 
             with patch.object(sys, "argv", argv), patch("scripts.download_pdfs.run", side_effect=fake_run):
                 main()
 
             self.assertIs(captured["config"].enabled, False)
+            self.assertIs(captured["config"].dry_run, True)
 
     def test_same_year_title_different_doi_need_distinct_target_paths(self):
         record_one = {
