@@ -33,6 +33,7 @@ AI_Agent_reading/
   scripts/                     # 可复现流程脚本
     search_openalex.py         # 搜索候选论文元数据
     screen_candidates.py       # 规则粗筛与噪声过滤
+    download_pdfs.py           # 自动下载元数据中已有的开放 PDF URL
     parse_pdfs.py              # PDF 转 Markdown
     build_minimal_rag_chunks.py# 从阅读卡片和综合文档生成 RAG chunks
 
@@ -44,7 +45,8 @@ AI_Agent_reading/
     screening_results.md
     screening_comparison.md
     core_papers_priority.md
-    pdf_download_log.md
+    pdf_download_results.jsonl # PDF 下载结果明细
+    pdf_download_log.md        # PDF 下载记录与人工处理清单
     pdf_parse_log.md
     openalex_test_results.md
 
@@ -115,15 +117,33 @@ papers/screening_results.md
 papers/screening_comparison.md
 ```
 
-### 3. 放入合法 PDF
+### 3. 自动下载开放 PDF，并人工补充机构权限 PDF
 
-将开放获取 PDF 或通过学校/机构权限合法下载的 PDF 放入：
+先运行自动下载脚本，下载元数据中已经提供的开放 PDF URL：
+
+```bash
+python3 scripts/download_pdfs.py
+```
+
+输出：
+
+```text
+papers/raw_pdf/*.pdf
+papers/pdf_download_results.jsonl
+papers/pdf_download_log.md
+```
+
+如需只检查将执行的动作、不发起下载，可运行 dry run：
+
+```bash
+python3 scripts/download_pdfs.py --dry-run
+```
+
+合规说明：本项目不绕过 paywall；闭源论文、没有开放 PDF URL 的论文，或只能通过学校/机构权限访问的论文，都会记录为 `manual_required`。用户可在合法前提下手动下载后放入：
 
 ```text
 papers/raw_pdf/
 ```
-
-注意：本项目不绕过 paywall；闭源论文只标记为人工下载。
 
 ### 4. 解析 PDF
 
