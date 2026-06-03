@@ -25,3 +25,23 @@ policy:
   avoid_bulk_downloading_from_publishers: true
   keep_metadata_when_pdf_unavailable: true
   do_not_fabricate_missing_fields: true
+
+pdf_download:
+  enabled: true
+  strategy: open_access_first
+  sleep_seconds: 1.0
+  timeout_seconds: 60
+  user_agent: AI-Agent-Reading/0.1 open-access-pdf-downloader
+  policy_notes:
+    - Automatically download only direct open PDF URLs already present in metadata.
+    - Do not bypass paywalls or access controls.
+    - Keep closed or unavailable papers as manual_required.
+  publisher_adapters:
+    sciencedirect:
+      enabled: false
+      reference_project: https://github.com/GAO-pooh/paper-scraper
+      note: Future adapter may reuse browser login/CDP patterns only with legitimate institutional access.
+    informs:
+      enabled: false
+      reference_project: https://github.com/GAO-pooh/paper-scraper
+      note: Future adapter may reuse session-cookie patterns only with legitimate institutional access.

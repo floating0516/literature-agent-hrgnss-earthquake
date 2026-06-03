@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,8 @@ DEFAULT_INPUT = BASE_DIR / "papers" / "selected_papers.jsonl"
 DEFAULT_OUTPUT = BASE_DIR / "papers" / "download_results.jsonl"
 DEFAULT_LOG = BASE_DIR / "papers" / "pdf_download_log.md"
 DEFAULT_PDF_DIR = BASE_DIR / "papers" / "raw_pdf"
+DEFAULT_CONFIG = BASE_DIR / "configs" / "sources.yaml"
+DEFAULT_USER_AGENT = "AI-Agent-Reading/0.1 open-access-pdf-downloader"
 SLUG_WORD_LIMIT = 8
 
 
@@ -32,8 +35,88 @@ class DownloadConfig:
     output_path: Path = DEFAULT_OUTPUT
     log_path: Path = DEFAULT_LOG
     pdf_dir: Path = DEFAULT_PDF_DIR
-    timeout: int = 60
+    timeout: float = 60
+    sleep_seconds: float = 1.0
+    user_agent: str = DEFAULT_USER_AGENT
     overwrite: bool = False
+
+
+def parse_scalar(value: str) -> Any:
+    value = value.strip()
+    if not value:
+        return ""
+
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1]
+
+    try:
+        if any(ch in value for ch in (".", "e", "E")):
+            return float(value)
+        return int(value)
+    except ValueError:
+        return value
+
+
+
+def load_download_policy(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
+    policy: dict[str, Any] = {
+        "enabled": True,
+        "sleep_seconds": 1.0,
+        "timeout_seconds": 60,
+        "user_agent": DEFAULT_USER_AGENT,
+        "publisher_adapters": {
+            "sciencedirect": {"enabled": False},
+            "informs": {"enabled": False},
+        },
+    }
+    if not path.exists():
+        return policy
+
+    stack: list[tuple[int, Any]] = [(-1, {"pdf_download": {}})]
+    with path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.rstrip()
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("- "):
+                continue
+
+            indent = len(line) - len(line.lstrip(" "))
+            while len(stack) > 1 and indent <= stack[-1][0]:
+                stack.pop()
+
+            if ":" not in stripped:
+                continue
+
+            key, raw_value = stripped.split(":", 1)
+            key = key.strip()
+            raw_value = raw_value.strip()
+            parent = stack[-1][1]
+            if raw_value:
+                parent[key] = parse_scalar(raw_value)
+            else:
+                parent[key] = {}
+                stack.append((indent, parent[key]))
+
+    loaded = stack[0][1].get("pdf_download", {})
+    for key in ("enabled", "sleep_seconds", "timeout_seconds", "user_agent"):
+        if key in loaded:
+            policy[key] = loaded[key]
+
+    adapters = loaded.get("publisher_adapters", {})
+    if isinstance(adapters, dict):
+        for name in ("sciencedirect", "informs"):
+            adapter = adapters.get(name)
+            if isinstance(adapter, dict) and "enabled" in adapter:
+                policy["publisher_adapters"][name]["enabled"] = bool(adapter["enabled"])
+
+    return policy
+
 
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -166,7 +249,7 @@ def download_pdf(record: dict[str, Any], config: DownloadConfig) -> dict[str, An
 
     request = urllib.request.Request(
         pdf_url,
-        headers={"User-Agent": "AI-Agent-Reading/0.1 (open-access-pdf-downloader)"},
+        headers={"User-Agent": config.user_agent},
     )
 
     try:
@@ -232,7 +315,11 @@ def write_markdown_log(log_path: Path, results: list[dict[str, Any]], *, input_p
 
 def run(config: DownloadConfig) -> list[dict[str, Any]]:
     records = load_jsonl(config.input_path)
-    results = [download_pdf(record, config) for record in records]
+    results: list[dict[str, Any]] = []
+    for index, record in enumerate(records):
+        results.append(download_pdf(record, config))
+        if config.sleep_seconds > 0 and index < len(records) - 1:
+            time.sleep(config.sleep_seconds)
     write_jsonl(config.output_path, results)
     write_markdown_log(
         config.log_path,
@@ -247,11 +334,14 @@ def run(config: DownloadConfig) -> list[dict[str, Any]]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download open-access PDFs from existing metadata URLs.")
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="YAML policy config path.")
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT, help="Input JSONL metadata path.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Output JSONL result path.")
     parser.add_argument("--log", type=Path, default=DEFAULT_LOG, help="Markdown log path.")
     parser.add_argument("--pdf-dir", type=Path, default=DEFAULT_PDF_DIR, help="Directory for downloaded PDFs.")
-    parser.add_argument("--timeout", type=int, default=60, help="HTTP timeout in seconds.")
+    parser.add_argument("--sleep", type=float, default=None, help="Seconds to sleep between downloads.")
+    parser.add_argument("--timeout", type=float, default=None, help="HTTP timeout in seconds.")
+    parser.add_argument("--user-agent", default=None, help="HTTP User-Agent header.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing PDFs.")
     return parser.parse_args()
 
@@ -259,12 +349,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    policy = load_download_policy(args.config)
     config = DownloadConfig(
         input_path=args.input,
         output_path=args.output,
         log_path=args.log,
         pdf_dir=args.pdf_dir,
-        timeout=args.timeout,
+        timeout=args.timeout if args.timeout is not None else float(policy["timeout_seconds"]),
+        sleep_seconds=args.sleep if args.sleep is not None else float(policy["sleep_seconds"]),
+        user_agent=args.user_agent if args.user_agent is not None else str(policy["user_agent"]),
         overwrite=args.overwrite,
     )
     results = run(config)

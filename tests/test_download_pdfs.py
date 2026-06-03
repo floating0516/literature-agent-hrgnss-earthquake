@@ -18,6 +18,7 @@ from scripts.download_pdfs import (
     DownloadConfig,
     choose_pdf_url,
     download_pdf,
+    load_download_policy,
     load_jsonl,
     make_pdf_filename,
     run,
@@ -86,6 +87,33 @@ def no_proxy_url_opener():
         yield
     finally:
         urllib.request._opener = previous_opener
+
+
+class DownloadPolicyTests(unittest.TestCase):
+    def test_load_download_policy_reads_simple_yaml_subset(self):
+        yaml_text = """pdf_download:
+  enabled: true
+  sleep_seconds: 2.5
+  timeout_seconds: 45
+  user_agent: AI-Agent-Reading test
+  publisher_adapters:
+    sciencedirect:
+      enabled: false
+    informs:
+      enabled: false
+"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "sources.yaml"
+            config_path.write_text(yaml_text, encoding="utf-8")
+
+            policy = load_download_policy(config_path)
+
+        self.assertEqual(policy["sleep_seconds"], 2.5)
+        self.assertEqual(policy["timeout_seconds"], 45)
+        self.assertEqual(policy["user_agent"], "AI-Agent-Reading test")
+        self.assertFalse(policy["publisher_adapters"]["sciencedirect"]["enabled"])
+        self.assertFalse(policy["publisher_adapters"]["informs"]["enabled"])
 
 
 class DownloadPdfPureFunctionTests(unittest.TestCase):
