@@ -139,11 +139,27 @@ papers/pdf_download_log.md
 python3 scripts/download_pdfs.py --dry-run
 ```
 
-合规说明：本项目不绕过 paywall。`manual_required` 表示元数据中没有可用开放 PDF URL，或现有元数据无法定位到开放 PDF，需要人工判断或补充；`failed` 表示已经有候选 URL，但远端拒绝、超时、返回非 PDF / 登录页等，需要人工检查。对于只能通过学校/机构权限合法访问的 PDF，请由用户自行下载后放入：
+合规说明：本项目不绕过 paywall。`manual_required` 表示元数据中没有可用开放 PDF URL，或现有元数据无法定位到开放 PDF，需要人工判断或补充；`failed` 表示已经有候选 URL，但远端拒绝、超时、返回非 PDF / 登录页等，需要人工检查。
+
+对于用户已经通过学校/机构权限或其他合法方式手动下载的 PDF，可以先放入一个本地 inbox 目录，例如：
 
 ```text
-papers/raw_pdf/
+papers/manual_pdf_inbox/
 ```
+
+然后先运行手动 PDF 自动匹配的 dry run，检查脚本建议如何匹配和命名：
+
+```bash
+python3 scripts/match_manual_pdfs.py --manual-dir papers/manual_pdf_inbox --dry-run
+```
+
+确认无误后再执行 apply，把匹配成功的 PDF 复制到 canonical `papers/raw_pdf/` 文件名，并更新下载结果：
+
+```bash
+python3 scripts/match_manual_pdfs.py --manual-dir papers/manual_pdf_inbox --apply
+```
+
+该匹配步骤只扫描用户本地已有 PDF，不联网下载，不读取浏览器 cookie，不绕过 paywall、验证码、Cloudflare 或任何访问控制。无法唯一高置信匹配的 PDF 会保留在日志里供人工判断。
 
 ### 4. 解析 PDF
 
