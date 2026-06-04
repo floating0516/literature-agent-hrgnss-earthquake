@@ -18,11 +18,11 @@
 | `papers/notes/crowell_2016_cascadia_gfast_reading_note.md` | reading_note | 20 |
 | `papers/notes/kawamoto_2016_regard_kumamoto_reading_note.md` | reading_note | 19 |
 | `papers/notes/melgar_2019_realtime_hr_gnss_ridgecrest_reading_note.md` | reading_note | 16 |
-| `papers/notes/2021_earthquake_magnitude_estimation_from_high_rate_gnss_data_reading_note.md` | markdown | 22 |
-| `papers/notes/2019_quantifying_the_value_of_real_time_geodetic_constraints_reading_note.md` | markdown | 21 |
-| `papers/notes/2020_bayesian_deep_learning_estimation_of_earthquake_location_from_reading_note.md` | markdown | 20 |
+| `papers/notes/2021_earthquake_magnitude_estimation_from_high_rate_gnss_data_reading_note.md` | reading_note | 22 |
+| `papers/notes/2019_quantifying_the_value_of_real_time_geodetic_constraints_reading_note.md` | reading_note | 21 |
+| `papers/notes/2020_bayesian_deep_learning_estimation_of_earthquake_location_from_reading_note.md` | reading_note | 20 |
 | `synthesis/三篇实时GNSS地震预警论文综合.md` | synthesis | 26 |
-| `synthesis/HR-GNSS大震快速震源表征研究主线综述.md` | markdown | 38 |
+| `synthesis/HR-GNSS大震快速震源表征研究主线综述.md` | synthesis | 38 |
 
 ---
 

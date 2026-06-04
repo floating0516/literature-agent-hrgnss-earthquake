@@ -28,21 +28,33 @@ DEFAULT_INPUTS = [
     BASE_DIR / "papers" / "notes" / "crowell_2016_cascadia_gfast_reading_note.md",
     BASE_DIR / "papers" / "notes" / "kawamoto_2016_regard_kumamoto_reading_note.md",
     BASE_DIR / "papers" / "notes" / "melgar_2019_realtime_hr_gnss_ridgecrest_reading_note.md",
+    BASE_DIR / "papers" / "notes" / "2021_earthquake_magnitude_estimation_from_high_rate_gnss_data_reading_note.md",
+    BASE_DIR / "papers" / "notes" / "2019_quantifying_the_value_of_real_time_geodetic_constraints_reading_note.md",
+    BASE_DIR / "papers" / "notes" / "2020_bayesian_deep_learning_estimation_of_earthquake_location_from_reading_note.md",
     BASE_DIR / "synthesis" / "三篇实时GNSS地震预警论文综合.md",
+    BASE_DIR / "synthesis" / "HR-GNSS大震快速震源表征研究主线综述.md",
 ]
 
 PAPER_ID_BY_FILENAME = {
     "crowell_2016_cascadia_gfast_reading_note.md": "crowell_2016_cascadia_gfast",
     "kawamoto_2016_regard_kumamoto_reading_note.md": "kawamoto_2016_regard_kumamoto",
     "melgar_2019_realtime_hr_gnss_ridgecrest_reading_note.md": "melgar_2019_realtime_hr_gnss_ridgecrest",
+    "2021_earthquake_magnitude_estimation_from_high_rate_gnss_data_reading_note.md": "2021_earthquake_magnitude_estimation_from_high_rate_gnss_data",
+    "2019_quantifying_the_value_of_real_time_geodetic_constraints_reading_note.md": "2019_quantifying_the_value_of_real_time_geodetic_constraints",
+    "2020_bayesian_deep_learning_estimation_of_earthquake_location_from_reading_note.md": "2020_bayesian_deep_learning_estimation_of_earthquake_location_from",
     "三篇实时GNSS地震预警论文综合.md": "three_paper_realtime_gnss_synthesis",
+    "HR-GNSS大震快速震源表征研究主线综述.md": "hr_gnss_rapid_source_characterization_synthesis",
 }
 
 SOURCE_TYPE_BY_FILENAME = {
     "crowell_2016_cascadia_gfast_reading_note.md": "reading_note",
     "kawamoto_2016_regard_kumamoto_reading_note.md": "reading_note",
     "melgar_2019_realtime_hr_gnss_ridgecrest_reading_note.md": "reading_note",
+    "2021_earthquake_magnitude_estimation_from_high_rate_gnss_data_reading_note.md": "reading_note",
+    "2019_quantifying_the_value_of_real_time_geodetic_constraints_reading_note.md": "reading_note",
+    "2020_bayesian_deep_learning_estimation_of_earthquake_location_from_reading_note.md": "reading_note",
     "三篇实时GNSS地震预警论文综合.md": "synthesis",
+    "HR-GNSS大震快速震源表征研究主线综述.md": "synthesis",
 }
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
@@ -292,7 +304,7 @@ def parse_args() -> argparse.Namespace:
         nargs="*",
         type=Path,
         default=DEFAULT_INPUTS,
-        help="Markdown files to chunk. Defaults to the three reading notes and synthesis.",
+        help="Markdown files to chunk. Defaults to curated reading notes and synthesis documents.",
     )
     return parser.parse_args()
 
