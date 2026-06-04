@@ -1,5 +1,6 @@
 # Local / generated binary paper files
 papers/raw_pdf/
+papers/manual_pdf_inbox/
 reference_nature_agent/*.pdf
 
 # Parsed full text derived from PDFs; keep locally, do not publish by default
