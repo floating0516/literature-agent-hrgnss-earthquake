@@ -45,6 +45,30 @@ class RagChunkBuilderTests(unittest.TestCase):
             "synthesis",
         )
 
+    def test_infer_tags_from_reading_note_sections(self):
+        self.assertEqual(rag_builder.infer_tags("6. Method", ""), ["method"])
+        self.assertEqual(rag_builder.infer_tags("5. Data", ""), ["dataset"])
+        self.assertEqual(rag_builder.infer_tags("7. Evaluation metrics", ""), ["metric"])
+        self.assertEqual(rag_builder.infer_tags("8. Key results", ""), ["result"])
+        self.assertEqual(rag_builder.infer_tags("10. Limitations", ""), ["limitation"])
+        self.assertEqual(rag_builder.infer_tags("11. Relation to my research", ""), ["relation_to_my_research"])
+        self.assertEqual(rag_builder.infer_tags("12. Useful citations or quotable ideas", ""), ["citation_candidate"])
+        self.assertEqual(rag_builder.infer_tags("13. Open questions", ""), ["future_work"])
+
+    def test_build_chunks_adds_tags_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            note_path = Path(tmp) / "note.md"
+            note_path.write_text(
+                "# Test Note\n\n"
+                "## 6. Method\n\n"
+                "Bayesian deep learning method details for earthquake location and uncertainty.\n",
+                encoding="utf-8",
+            )
+
+            chunks = rag_builder.build_chunks([note_path])
+
+        self.assertEqual(chunks[0]["tags"], ["method"])
+
 
 class RagChunkSearchTests(unittest.TestCase):
     def test_keyword_search_returns_ranked_matching_chunk_with_metadata(self):
@@ -53,16 +77,20 @@ class RagChunkSearchTests(unittest.TestCase):
         chunks = [
             {
                 "chunk_id": "chunk-a",
+                "paper_id": "paper-a",
                 "source_file": "papers/notes/a.md",
                 "source_type": "reading_note",
                 "section": "Method",
+                "tags": ["method"],
                 "text": "Bayesian deep learning estimates earthquake location uncertainty.",
             },
             {
                 "chunk_id": "chunk-b",
+                "paper_id": "paper-b",
                 "source_file": "papers/notes/b.md",
                 "source_type": "reading_note",
                 "section": "Data",
+                "tags": ["dataset"],
                 "text": "High-rate GNSS captures permanent displacement.",
             },
         ]
@@ -73,6 +101,39 @@ class RagChunkSearchTests(unittest.TestCase):
         self.assertEqual(results[0]["chunk"]["chunk_id"], "chunk-a")
         self.assertGreater(results[0]["score"], 0)
 
+    def test_keyword_search_filters_by_source_type_tag_and_paper_id(self):
+        from scripts.search_rag_chunks import SearchFilters, search_chunks
+
+        chunks = [
+            {
+                "chunk_id": "chunk-a",
+                "paper_id": "paper-a",
+                "source_file": "papers/notes/a.md",
+                "source_type": "reading_note",
+                "section": "Method",
+                "tags": ["method"],
+                "text": "GNSS magnitude method.",
+            },
+            {
+                "chunk_id": "chunk-b",
+                "paper_id": "paper-b",
+                "source_file": "synthesis/b.md",
+                "source_type": "synthesis",
+                "section": "Limitations",
+                "tags": ["limitation"],
+                "text": "GNSS magnitude limitation.",
+            },
+        ]
+
+        results = search_chunks(
+            chunks,
+            "GNSS magnitude",
+            filters=SearchFilters(source_type="synthesis", tag="limitation", paper_id="paper-b"),
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["chunk"]["chunk_id"], "chunk-b")
+
     def test_cli_search_prints_chunk_id_source_and_excerpt(self):
         with tempfile.TemporaryDirectory() as tmp:
             chunks_path = Path(tmp) / "chunks.jsonl"
@@ -80,9 +141,11 @@ class RagChunkSearchTests(unittest.TestCase):
                 json.dumps(
                     {
                         "chunk_id": "chunk-a",
+                        "paper_id": "paper-a",
                         "source_file": "papers/notes/a.md",
                         "source_type": "reading_note",
                         "section": "Method",
+                        "tags": ["method"],
                         "text": "Bayesian deep learning estimates earthquake location uncertainty.",
                     },
                     ensure_ascii=False,
@@ -100,6 +163,12 @@ class RagChunkSearchTests(unittest.TestCase):
                     str(chunks_path),
                     "--limit",
                     "1",
+                    "--source-type",
+                    "reading_note",
+                    "--tag",
+                    "method",
+                    "--paper-id",
+                    "paper-a",
                 ],
                 cwd=PROJECT_ROOT,
                 text=True,
@@ -110,7 +179,48 @@ class RagChunkSearchTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("chunk-a", result.stdout)
         self.assertIn("papers/notes/a.md", result.stdout)
+        self.assertIn("tags: method", result.stdout)
         self.assertIn("Bayesian deep learning", result.stdout)
+
+    def test_cli_search_json_output_returns_machine_readable_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chunks_path = Path(tmp) / "chunks.jsonl"
+            chunks_path.write_text(
+                json.dumps(
+                    {
+                        "chunk_id": "chunk-a",
+                        "paper_id": "paper-a",
+                        "source_file": "papers/notes/a.md",
+                        "source_type": "reading_note",
+                        "section": "Method",
+                        "tags": ["method"],
+                        "text": "Bayesian deep learning estimates earthquake location uncertainty.",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/search_rag_chunks.py",
+                    "bayesian uncertainty",
+                    "--chunks",
+                    str(chunks_path),
+                    "--json",
+                ],
+                cwd=PROJECT_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload[0]["chunk"]["chunk_id"], "chunk-a")
+        self.assertEqual(payload[0]["chunk"]["tags"], ["method"])
 
 
 if __name__ == "__main__":

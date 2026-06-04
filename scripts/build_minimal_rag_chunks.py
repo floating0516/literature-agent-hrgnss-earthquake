@@ -161,6 +161,34 @@ def infer_title(markdown: str, path: Path) -> str:
     return path.stem
 
 
+def display_path(path: Path) -> str:
+    try:
+        return path.relative_to(BASE_DIR).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def infer_tags(section_heading: str, text: str) -> list[str]:
+    normalized = f"{section_heading}\n{text}".lower()
+    tag_rules = [
+        ("method", ["method", "方法", "model", "algorithm", "模型", "算法"]),
+        ("dataset", ["data", "dataset", "数据", "benchmark"]),
+        ("metric", ["metric", "evaluation", "评价", "评估", "指标"]),
+        ("result", ["result", "key result", "结果", "发现"]),
+        ("limitation", ["limitation", "局限", "不足", "challenge"]),
+        ("relation_to_my_research", ["relation to my research", "my research", "我的研究"]),
+        ("citation_candidate", ["citation", "quotable", "引用", "可引用"]),
+        ("future_work", ["open question", "future", "todo", "下一步", "问题"]),
+        ("background", ["background", "motivation", "背景", "动机"]),
+    ]
+
+    tags = []
+    for tag, keywords in tag_rules:
+        if any(keyword in normalized for keyword in keywords):
+            tags.append(tag)
+    return tags or ["general"]
+
+
 def build_chunks(paths: Iterable[Path]) -> list[dict[str, object]]:
     chunks: list[dict[str, object]] = []
 
@@ -169,7 +197,7 @@ def build_chunks(paths: Iterable[Path]) -> list[dict[str, object]]:
         title = infer_title(markdown, path)
         paper_id = PAPER_ID_BY_FILENAME.get(path.name, path.stem)
         source_type = SOURCE_TYPE_BY_FILENAME.get(path.name, "markdown")
-        relative_path = path.relative_to(BASE_DIR).as_posix()
+        relative_path = display_path(path)
 
         for section_index, section in enumerate(parse_sections(markdown), start=1):
             parts = split_long_text(section.text)
@@ -185,6 +213,7 @@ def build_chunks(paths: Iterable[Path]) -> list[dict[str, object]]:
                         "source_type": source_type,
                         "section": section.heading,
                         "section_level": section.level,
+                        "tags": infer_tags(section.heading, part),
                         "chunk_index": len(chunks) + 1,
                         "section_index": section_index,
                         "part_index": part_index,
@@ -249,6 +278,7 @@ def write_report(path: Path, chunks: list[dict[str, object]], output_path: Path)
                     "source_type": "reading_note / synthesis / markdown",
                     "section": "markdown heading",
                     "section_level": "heading level",
+                    "tags": "deterministic section/content tags such as method, dataset, metric, result, limitation",
                     "chunk_index": "global order in chunks.jsonl",
                     "section_index": "order within source document",
                     "part_index": "split index if section is long",
@@ -267,6 +297,7 @@ def write_report(path: Path, chunks: list[dict[str, object]], output_path: Path)
             "- 当前版本按 Markdown heading 切分，优先保留阅读卡片和 synthesis 的语义结构；",
             "- 暂不构建向量库，先生成可检查、可追溯的 JSONL；",
             "- 每个 chunk 保留 `paper_id`、`source_file`、`section`，方便后续引用回原文；",
+            "- 每个 chunk 基于 section heading 和正文内容附加确定性 `tags`，便于按 method / dataset / result / limitation 等类型筛选；",
             "- 长 section 会按段落进一步切分，避免单个 chunk 过长；",
             "- 后续可以在此基础上接 Chroma/LanceDB 和 embedding model。",
             "",

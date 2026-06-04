@@ -37,6 +37,7 @@
   "source_type": "reading_note / synthesis / markdown",
   "section": "markdown heading",
   "section_level": "heading level",
+  "tags": "deterministic section/content tags such as method, dataset, metric, result, limitation",
   "chunk_index": "global order in chunks.jsonl",
   "section_index": "order within source document",
   "part_index": "split index if section is long",
@@ -52,6 +53,7 @@
 - 当前版本按 Markdown heading 切分，优先保留阅读卡片和 synthesis 的语义结构；
 - 暂不构建向量库，先生成可检查、可追溯的 JSONL；
 - 每个 chunk 保留 `paper_id`、`source_file`、`section`，方便后续引用回原文；
+- 每个 chunk 基于 section heading 和正文内容附加确定性 `tags`，便于按 method / dataset / result / limitation 等类型筛选；
 - 长 section 会按段落进一步切分，避免单个 chunk 过长；
 - 后续可以在此基础上接 Chroma/LanceDB 和 embedding model。
 
