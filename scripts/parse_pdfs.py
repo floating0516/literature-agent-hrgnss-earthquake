@@ -117,6 +117,25 @@ def write_log(log_path: Path, results: list[tuple[Path, Path, str | None]], back
     log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def run(
+    input_dir: Path = DEFAULT_INPUT_DIR,
+    pdf_path: Path | None = None,
+    output_dir: Path = DEFAULT_OUTPUT_DIR,
+    log_path: Path = DEFAULT_LOG,
+    backend: str = "pymupdf4llm",
+) -> list[tuple[Path, Path, str | None]]:
+    pdfs = [pdf_path] if pdf_path else sorted(input_dir.glob("*.pdf"))
+    results = []
+    for pdf in pdfs:
+        md_path, error = parse_pdf(pdf, output_dir, backend=backend)
+        results.append((pdf, md_path, error))
+        print(f"{pdf.name}: {'failed' if error else 'success'}")
+    write_log(log_path, results, backend=backend)
+    print(f"Parsed {len(results)} PDFs")
+    print(f"Wrote log to {log_path}")
+    return results
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Parse PDFs into Markdown text files.")
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
@@ -129,15 +148,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    pdfs = [args.pdf] if args.pdf else sorted(args.input_dir.glob("*.pdf"))
-    results = []
-    for pdf_path in pdfs:
-        md_path, error = parse_pdf(pdf_path, args.output_dir, backend=args.backend)
-        results.append((pdf_path, md_path, error))
-        print(f"{pdf_path.name}: {'failed' if error else 'success'}")
-    write_log(args.log, results, backend=args.backend)
-    print(f"Parsed {len(results)} PDFs")
-    print(f"Wrote log to {args.log}")
+    run(
+        input_dir=args.input_dir,
+        pdf_path=args.pdf,
+        output_dir=args.output_dir,
+        log_path=args.log,
+        backend=args.backend,
+    )
 
 
 if __name__ == "__main__":

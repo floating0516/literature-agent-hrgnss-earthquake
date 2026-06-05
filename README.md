@@ -36,6 +36,7 @@ AI_Agent_reading/
     download_pdfs.py           # 自动下载元数据中已有的开放 PDF URL
     parse_pdfs.py              # PDF 转 Markdown
     build_minimal_rag_chunks.py# 从阅读卡片和综合文档生成 RAG chunks
+    run_pipeline.py            # 串联搜索、筛选、下载、解析和 RAG 构建
 
   papers/                      # 当前主题的论文材料
     candidates.jsonl           # 搜索得到的候选元数据
@@ -87,7 +88,43 @@ AI_Agent_reading/
 
 ---
 
+## 环境准备
+
+推荐使用 `uv` 复现 Python 依赖环境：
+
+```bash
+uv sync --locked
+```
+
+之后可以通过 `uv run` 运行脚本，例如：
+
+```bash
+uv run python scripts/parse_pdfs.py
+```
+
+当前默认 PDF 解析 backend 是 `pymupdf4llm`，依赖已记录在 `pyproject.toml` 和 `uv.lock` 中。`pdftotext` backend 仍可作为显式兼容选项使用，但它依赖系统命令。
+
+---
+
 ## 可复现流程
+
+### 一键运行 pipeline
+
+可以使用总控脚本串联搜索、筛选、下载、解析和 RAG chunk 构建：
+
+```bash
+uv run python scripts/run_pipeline.py
+```
+
+常用局部运行示例：
+
+```bash
+uv run python scripts/run_pipeline.py --from-stage download --to-stage rag
+uv run python scripts/run_pipeline.py --to-stage parse --dry-run
+uv run python scripts/run_pipeline.py --match-manual --manual-dir papers/manual_pdf_inbox
+```
+
+说明：手动 PDF 匹配默认关闭，只有传入 `--match-manual` 时才会扫描用户本地已有 PDF；该步骤不联网、不绕过 paywall 或任何访问控制。`--dry-run` 只对支持 dry run 的阶段生效，例如下载和手动匹配。
 
 ### 1. 搜索候选论文
 

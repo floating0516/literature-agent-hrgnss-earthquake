@@ -422,6 +422,31 @@ def write_comparison(path: Path, records: list[dict[str, Any]], screened: list[d
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def run(
+    input_path: Path = DEFAULT_INPUT,
+    output_path: Path = DEFAULT_OUTPUT,
+    selected_path: Path = DEFAULT_SELECTED,
+    report_path: Path = DEFAULT_REPORT,
+    comparison_path: Path = DEFAULT_COMPARISON,
+) -> list[dict[str, Any]]:
+    records = load_jsonl(input_path)
+    screened = screen(records)
+    selected = [r for r in screened if r["screening"]["decision"] in {"keep", "maybe"}]
+
+    write_jsonl(output_path, screened)
+    write_jsonl(selected_path, selected)
+    write_report(report_path, screened)
+    write_comparison(comparison_path, records, screened)
+
+    counts = {decision: sum(1 for r in screened if r["screening"]["decision"] == decision) for decision in ["keep", "maybe", "discard"]}
+    print(f"Screened {len(screened)} records: keep={counts['keep']}, maybe={counts['maybe']}, discard={counts['discard']}")
+    print(f"Saved screened records to {output_path}")
+    print(f"Saved selected records to {selected_path}")
+    print(f"Saved report to {report_path}")
+    print(f"Saved comparison to {comparison_path}")
+    return screened
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Coarse-screen candidate papers.")
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
@@ -434,21 +459,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    records = load_jsonl(args.input)
-    screened = screen(records)
-    selected = [r for r in screened if r["screening"]["decision"] in {"keep", "maybe"}]
-
-    write_jsonl(args.output, screened)
-    write_jsonl(args.selected, selected)
-    write_report(args.report, screened)
-    write_comparison(args.comparison, records, screened)
-
-    counts = {decision: sum(1 for r in screened if r["screening"]["decision"] == decision) for decision in ["keep", "maybe", "discard"]}
-    print(f"Screened {len(screened)} records: keep={counts['keep']}, maybe={counts['maybe']}, discard={counts['discard']}")
-    print(f"Saved screened records to {args.output}")
-    print(f"Saved selected records to {args.selected}")
-    print(f"Saved report to {args.report}")
-    print(f"Saved comparison to {args.comparison}")
+    run(
+        input_path=args.input,
+        output_path=args.output,
+        selected_path=args.selected,
+        report_path=args.report,
+        comparison_path=args.comparison,
+    )
 
 
 if __name__ == "__main__":

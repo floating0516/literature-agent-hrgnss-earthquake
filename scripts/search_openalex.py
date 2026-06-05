@@ -216,6 +216,39 @@ def write_summary(path: Path, records: list[dict[str, Any]], query_stats: list[d
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def run(
+    queries: list[str],
+    per_page: int,
+    mailto: str | None,
+    output_path: Path = DEFAULT_OUTPUT,
+    summary_path: Path = DEFAULT_SUMMARY,
+) -> list[dict[str, Any]]:
+    start_total = time.perf_counter()
+    records: list[dict[str, Any]] = []
+    query_stats: list[dict[str, Any]] = []
+
+    for query in queries:
+        works, meta, elapsed = fetch_openalex(query, per_page, mailto)
+        query_stats.append({
+            "query": query,
+            "count": meta.get("count"),
+            "returned": len(works),
+            "elapsed": elapsed,
+        })
+        records.extend(normalize_work(work, query) for work in works)
+
+    unique_records = dedupe(records)
+    elapsed_total = time.perf_counter() - start_total
+
+    write_jsonl(output_path, unique_records)
+    write_summary(summary_path, unique_records, query_stats, elapsed_total)
+
+    print(f"Saved {len(unique_records)} records to {output_path}")
+    print(f"Saved summary to {summary_path}")
+    print(f"Elapsed: {elapsed_total:.2f}s")
+    return unique_records
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Search OpenAlex for candidate literature metadata.")
     parser.add_argument("--query", action="append", help="Search query. Can be repeated. Defaults to GNSS test queries.")
@@ -228,31 +261,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    queries = args.query or DEFAULT_QUERIES
-
-    start_total = time.perf_counter()
-    records: list[dict[str, Any]] = []
-    query_stats: list[dict[str, Any]] = []
-
-    for query in queries:
-        works, meta, elapsed = fetch_openalex(query, args.per_page, args.mailto)
-        query_stats.append({
-            "query": query,
-            "count": meta.get("count"),
-            "returned": len(works),
-            "elapsed": elapsed,
-        })
-        records.extend(normalize_work(work, query) for work in works)
-
-    unique_records = dedupe(records)
-    elapsed_total = time.perf_counter() - start_total
-
-    write_jsonl(args.output, unique_records)
-    write_summary(args.summary, unique_records, query_stats, elapsed_total)
-
-    print(f"Saved {len(unique_records)} records to {args.output}")
-    print(f"Saved summary to {args.summary}")
-    print(f"Elapsed: {elapsed_total:.2f}s")
+    run(
+        queries=args.query or DEFAULT_QUERIES,
+        per_page=args.per_page,
+        mailto=args.mailto,
+        output_path=args.output,
+        summary_path=args.summary,
+    )
 
 
 if __name__ == "__main__":

@@ -316,6 +316,28 @@ def write_report(path: Path, chunks: list[dict[str, object]], output_path: Path)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def run(
+    input_paths: list[Path] | None = None,
+    output_path: Path = DEFAULT_OUTPUT,
+    report_path: Path = DEFAULT_REPORT,
+) -> list[dict[str, object]]:
+    raw_input_paths = input_paths if input_paths is not None else DEFAULT_INPUTS
+    resolved_inputs = [path if path.is_absolute() else BASE_DIR / path for path in raw_input_paths]
+    missing = [path for path in resolved_inputs if not path.exists()]
+    if missing:
+        missing_list = "\n".join(str(path) for path in missing)
+        raise SystemExit(f"Missing input files:\n{missing_list}")
+
+    chunks = build_chunks(resolved_inputs)
+    resolved_output = output_path if output_path.is_absolute() else BASE_DIR / output_path
+    resolved_report = report_path if report_path.is_absolute() else BASE_DIR / report_path
+    write_jsonl(resolved_output, chunks)
+    write_report(resolved_report, chunks, resolved_output)
+    print(f"Wrote {len(chunks)} chunks to {resolved_output}")
+    print(f"Wrote report to {resolved_report}")
+    return chunks
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build minimal RAG chunks from curated Markdown notes.")
     parser.add_argument(
@@ -342,19 +364,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    input_paths = [path if path.is_absolute() else BASE_DIR / path for path in args.inputs]
-    missing = [path for path in input_paths if not path.exists()]
-    if missing:
-        missing_list = "\n".join(str(path) for path in missing)
-        raise SystemExit(f"Missing input files:\n{missing_list}")
-
-    chunks = build_chunks(input_paths)
-    output_path = args.output if args.output.is_absolute() else BASE_DIR / args.output
-    report_path = args.report if args.report.is_absolute() else BASE_DIR / args.report
-    write_jsonl(output_path, chunks)
-    write_report(report_path, chunks, output_path)
-    print(f"Wrote {len(chunks)} chunks to {output_path}")
-    print(f"Wrote report to {report_path}")
+    run(
+        input_paths=args.inputs,
+        output_path=args.output,
+        report_path=args.report,
+    )
 
 
 if __name__ == "__main__":
