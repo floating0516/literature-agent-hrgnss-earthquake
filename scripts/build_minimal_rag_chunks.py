@@ -232,7 +232,72 @@ def write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
             file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def write_report(path: Path, chunks: list[dict[str, object]], output_path: Path) -> None:
+def load_quality_records(path: Path | None) -> dict[str, dict[str, object]]:
+    if path is None or not path.exists():
+        return {}
+
+    records: dict[str, dict[str, object]] = {}
+    with path.open("r", encoding="utf-8") as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            source_file = record.get("source_file")
+            if source_file:
+                records[str(source_file)] = record
+    return records
+
+
+def quality_keys(path: Path) -> set[str]:
+    keys = {str(path)}
+    try:
+        keys.add(display_path(path))
+    except ValueError:
+        pass
+    return keys
+
+
+def quality_record_for(path: Path, records: dict[str, dict[str, object]]) -> dict[str, object] | None:
+    for key in quality_keys(path):
+        if key in records:
+            return records[key]
+    return None
+
+
+def is_low_quality(record: dict[str, object] | None, min_quality_score: int) -> bool:
+    if record is None:
+        return False
+    score = int(record.get("score") or 0)
+    return record.get("status") == "fail" or score < min_quality_score
+
+
+def filter_inputs_by_quality(
+    paths: list[Path],
+    quality_records: dict[str, dict[str, object]],
+    min_quality_score: int,
+) -> tuple[list[Path], list[dict[str, object]], list[Path]]:
+    included: list[Path] = []
+    skipped: list[dict[str, object]] = []
+    missing: list[Path] = []
+    for path in paths:
+        record = quality_record_for(path, quality_records)
+        if record is None:
+            missing.append(path)
+            included.append(path)
+        elif is_low_quality(record, min_quality_score):
+            skipped.append({"path": display_path(path), "record": record})
+        else:
+            included.append(path)
+    return included, skipped, missing
+
+
+def write_report(
+    path: Path,
+    chunks: list[dict[str, object]],
+    output_path: Path,
+    quality_filter: dict[str, object] | None = None,
+) -> None:
     by_source: dict[str, list[dict[str, object]]] = {}
     for chunk in chunks:
         by_source.setdefault(str(chunk["source_file"]), []).append(chunk)
@@ -246,7 +311,7 @@ def write_report(path: Path, chunks: list[dict[str, object]], output_path: Path)
         "",
         "## 1. 输出文件",
         "",
-        f"- Chunk JSONL: `{output_path.relative_to(BASE_DIR).as_posix()}`",
+        f"- Chunk JSONL: `{display_path(output_path)}`",
         f"- Chunk 数量：{len(chunks)}",
         "",
         "---",
@@ -261,12 +326,37 @@ def write_report(path: Path, chunks: list[dict[str, object]], output_path: Path)
         source_type = source_chunks[0]["source_type"]
         lines.append(f"| `{source_file}` | {source_type} | {len(source_chunks)} |")
 
+    if quality_filter:
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## 3. 质量过滤",
+            "",
+            f"- 启用：{quality_filter['enabled']}",
+            f"- 阈值：{quality_filter['min_quality_score']}",
+            f"- 质量文件：`{quality_filter['quality_path']}`",
+            f"- 跳过文件：{len(quality_filter['skipped'])}",
+            f"- 缺少质量记录但保留：{len(quality_filter['missing'])}",
+            "",
+            "| Skipped file | Score | Status | Reasons |",
+            "|---|---:|---|---|",
+        ])
+        for item in quality_filter["skipped"]:
+            record = item["record"]
+            reasons = "; ".join(record.get("reasons", [])).replace("|", "\\|")
+            lines.append(f"| `{item['path']}` | {record.get('score')} | {record.get('status')} | {reasons} |")
+
+    schema_section = "## 4. 当前 chunk schema" if quality_filter else "## 3. 当前 chunk schema"
+    design_section = "## 5. 设计说明" if quality_filter else "## 4. 设计说明"
+    next_section = "## 6. 下一步" if quality_filter else "## 5. 下一步"
+
     lines.extend(
         [
             "",
             "---",
             "",
-            "## 3. 当前 chunk schema",
+            schema_section,
             "",
             "```json",
             json.dumps(
@@ -292,7 +382,7 @@ def write_report(path: Path, chunks: list[dict[str, object]], output_path: Path)
             "",
             "---",
             "",
-            "## 4. 设计说明",
+            design_section,
             "",
             "- 当前版本按 Markdown heading 切分，优先保留阅读卡片和 synthesis 的语义结构；",
             "- 暂不构建向量库，先生成可检查、可追溯的 JSONL；",
@@ -303,7 +393,7 @@ def write_report(path: Path, chunks: list[dict[str, object]], output_path: Path)
             "",
             "---",
             "",
-            "## 5. 下一步",
+            next_section,
             "",
             "1. 为 chunk 增加更细的 tags，例如 method / metric / limitation / dataset；",
             "2. 接入 embedding，生成向量索引；",
@@ -320,6 +410,9 @@ def run(
     input_paths: list[Path] | None = None,
     output_path: Path = DEFAULT_OUTPUT,
     report_path: Path = DEFAULT_REPORT,
+    quality_path: Path | None = None,
+    exclude_low_quality: bool = False,
+    min_quality_score: int = 60,
 ) -> list[dict[str, object]]:
     raw_input_paths = input_paths if input_paths is not None else DEFAULT_INPUTS
     resolved_inputs = [path if path.is_absolute() else BASE_DIR / path for path in raw_input_paths]
@@ -328,11 +421,29 @@ def run(
         missing_list = "\n".join(str(path) for path in missing)
         raise SystemExit(f"Missing input files:\n{missing_list}")
 
-    chunks = build_chunks(resolved_inputs)
+    quality_filter = None
+    filtered_inputs = resolved_inputs
+    if exclude_low_quality:
+        resolved_quality_path = quality_path if quality_path is None or quality_path.is_absolute() else BASE_DIR / quality_path
+        quality_records = load_quality_records(resolved_quality_path)
+        filtered_inputs, skipped, missing_quality = filter_inputs_by_quality(
+            resolved_inputs,
+            quality_records,
+            min_quality_score,
+        )
+        quality_filter = {
+            "enabled": True,
+            "min_quality_score": min_quality_score,
+            "quality_path": display_path(resolved_quality_path) if resolved_quality_path else "",
+            "skipped": skipped,
+            "missing": [display_path(path) for path in missing_quality],
+        }
+
+    chunks = build_chunks(filtered_inputs)
     resolved_output = output_path if output_path.is_absolute() else BASE_DIR / output_path
     resolved_report = report_path if report_path.is_absolute() else BASE_DIR / report_path
     write_jsonl(resolved_output, chunks)
-    write_report(resolved_report, chunks, resolved_output)
+    write_report(resolved_report, chunks, resolved_output, quality_filter=quality_filter)
     print(f"Wrote {len(chunks)} chunks to {resolved_output}")
     print(f"Wrote report to {resolved_report}")
     return chunks

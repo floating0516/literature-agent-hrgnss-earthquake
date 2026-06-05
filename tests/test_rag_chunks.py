@@ -69,6 +69,42 @@ class RagChunkBuilderTests(unittest.TestCase):
 
         self.assertEqual(chunks[0]["tags"], ["method"])
 
+    def test_run_skips_low_quality_markdown_when_filter_is_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            good_path = tmp_path / "good.md"
+            bad_path = tmp_path / "bad.md"
+            output_path = tmp_path / "chunks.jsonl"
+            report_path = tmp_path / "report.md"
+            quality_path = tmp_path / "quality.jsonl"
+            good_path.write_text(
+                "# Good\n\n## Method\n\n"
+                "Readable GNSS method text for chunking and retrieval. "
+                "This paragraph is long enough to pass the minimal chunk length threshold and represent a useful parsed Markdown section.",
+                encoding="utf-8",
+            )
+            bad_path.write_text("# Bad\n\n## Body\n\nLow quality parsed text that should be skipped.", encoding="utf-8")
+            quality_records = [
+                {"source_file": str(good_path), "status": "pass", "score": 90, "reasons": []},
+                {"source_file": str(bad_path), "status": "fail", "score": 20, "reasons": ["document body is too short"]},
+            ]
+            quality_path.write_text("\n".join(json.dumps(record) for record in quality_records) + "\n", encoding="utf-8")
+
+            chunks = rag_builder.run(
+                input_paths=[good_path, bad_path],
+                output_path=output_path,
+                report_path=report_path,
+                quality_path=quality_path,
+                exclude_low_quality=True,
+                min_quality_score=60,
+            )
+
+            self.assertTrue(chunks)
+            self.assertTrue(all(chunk["source_file"] != str(bad_path) for chunk in chunks))
+            report_text = report_path.read_text(encoding="utf-8")
+            self.assertIn("质量过滤", report_text)
+            self.assertIn("bad.md", report_text)
+
 
 class RagChunkSearchTests(unittest.TestCase):
     def test_keyword_search_returns_ranked_matching_chunk_with_metadata(self):

@@ -122,9 +122,10 @@ uv run python scripts/run_pipeline.py
 uv run python scripts/run_pipeline.py --from-stage download --to-stage rag
 uv run python scripts/run_pipeline.py --to-stage parse --dry-run
 uv run python scripts/run_pipeline.py --match-manual --manual-dir papers/manual_pdf_inbox
+uv run python scripts/run_pipeline.py --rag-include-parsed-md --rag-exclude-low-quality
 ```
 
-说明：手动 PDF 匹配默认关闭，只有传入 `--match-manual` 时才会扫描用户本地已有 PDF；该步骤不联网、不绕过 paywall 或任何访问控制。`--dry-run` 只对支持 dry run 的阶段生效，例如下载和手动匹配。
+说明：手动 PDF 匹配默认关闭，只有传入 `--match-manual` 时才会扫描用户本地已有 PDF；该步骤不联网、不绕过 paywall 或任何访问控制。`--dry-run` 只对支持 dry run 的阶段生效，例如下载和手动匹配。pipeline 默认在 `parse` 和 `rag` 之间运行 `parse_quality`，生成 PDF 解析质量报告；解析后的 PDF Markdown 不会默认进入 curated RAG 输入，只有显式传入 `--rag-include-parsed-md` 时才会加入，且可用 `--rag-exclude-low-quality` 跳过低质量文件。
 
 ### 1. 搜索候选论文
 
@@ -211,7 +212,22 @@ papers/parsed_md/*.md
 papers/pdf_parse_log.md
 ```
 
-### 5. 生成/维护单篇阅读卡片
+### 5. 评估 PDF 解析质量
+
+```bash
+uv run python scripts/evaluate_parse_quality.py
+```
+
+输出：
+
+```text
+papers/parse_quality.jsonl
+papers/parse_quality_report.md
+```
+
+该步骤会为 `papers/parsed_md/*.md` 生成 `pass` / `warn` / `fail` 质量状态和可解释指标，用作 PDF→RAG 之间的质量闸门。
+
+### 6. 生成/维护单篇阅读卡片
 
 阅读卡片保存在：
 
@@ -225,7 +241,7 @@ papers/notes/
 prompts/paper_reading_prompt.md
 ```
 
-### 6. 生成跨文献综合
+### 7. 生成跨文献综合
 
 当前三篇论文综合保存在：
 
@@ -239,7 +255,7 @@ synthesis/三篇实时GNSS地震预警论文综合.md
 prompts/synthesis_prompt.md
 ```
 
-### 7. 构建最小 RAG chunks
+### 8. 构建最小 RAG chunks
 
 ```bash
 python3 scripts/build_minimal_rag_chunks.py
