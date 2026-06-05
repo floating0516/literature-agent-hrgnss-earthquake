@@ -81,6 +81,13 @@ def parse_pdf(pdf_path: Path, output_dir: Path, backend: str = "pymupdf4llm") ->
     return output_dir / f"{pdf_path.stem}.md", f"Unknown PDF parse backend: {backend}"
 
 
+def display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(BASE_DIR))
+    except ValueError:
+        return str(path)
+
+
 def write_log(log_path: Path, results: list[tuple[Path, Path, str | None]], backend: str = "pymupdf4llm") -> None:
     lines = [
         "# PDF 解析记录",
@@ -93,9 +100,7 @@ def write_log(log_path: Path, results: list[tuple[Path, Path, str | None]], back
     for pdf_path, md_path, error in results:
         status = "failed" if error else "success"
         notes = error.replace("\n", " ") if error else ""
-        lines.append(
-            f"| `papers/raw_pdf/{pdf_path.name}` | `papers/parsed_md/{md_path.name}` | {status} | {notes} |"
-        )
+        lines.append(f"| `{display_path(pdf_path)}` | `{display_path(md_path)}` | {status} | {notes} |")
 
     lines.extend([
         "",
@@ -115,6 +120,7 @@ def write_log(log_path: Path, results: list[tuple[Path, Path, str | None]], back
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Parse PDFs into Markdown text files.")
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
+    parser.add_argument("--pdf", type=Path, help="Parse a single PDF instead of all PDFs in --input-dir.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--log", type=Path, default=DEFAULT_LOG)
     parser.add_argument("--backend", choices=["pymupdf4llm", "pdftotext"], default="pymupdf4llm")
@@ -123,7 +129,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    pdfs = sorted(args.input_dir.glob("*.pdf"))
+    pdfs = [args.pdf] if args.pdf else sorted(args.input_dir.glob("*.pdf"))
     results = []
     for pdf_path in pdfs:
         md_path, error = parse_pdf(pdf_path, args.output_dir, backend=args.backend)
