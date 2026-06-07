@@ -36,6 +36,8 @@ AI_Agent_reading/
     download_pdfs.py           # 自动下载元数据中已有的开放 PDF URL
     parse_pdfs.py              # PDF 转 Markdown
     build_minimal_rag_chunks.py# 从阅读卡片和综合文档生成 RAG chunks
+    search_rag_chunks.py       # 关键词检索 RAG chunks
+    evaluate_rag_retrieval.py  # 用 curated eval set 评估 RAG 检索
     run_pipeline.py            # 串联搜索、筛选、下载、解析和 RAG 构建
 
   papers/                      # 当前主题的论文材料
@@ -66,6 +68,9 @@ AI_Agent_reading/
   rag/                         # RAG 数据层
     chunks.jsonl
     minimal_rag_build_report.md
+    retrieval_eval_set.jsonl
+    retrieval_eval_report.md
+    retrieval_eval_results.json
     embeddings_config.yaml
 
   reference_nature_agent/      # 最初参考的三篇 Nature Agent 论文和阅读报告
@@ -268,6 +273,37 @@ rag/chunks.jsonl
 rag/minimal_rag_build_report.md
 ```
 
+### 9. 评估 RAG 检索
+
+```bash
+uv run python scripts/evaluate_rag_retrieval.py \
+  --chunks rag/chunks.jsonl \
+  --eval-set rag/retrieval_eval_set.jsonl \
+  --report rag/retrieval_eval_report.md \
+  --json-output rag/retrieval_eval_results.json
+```
+
+输出：
+
+```text
+rag/retrieval_eval_report.md
+rag/retrieval_eval_results.json
+```
+
+该步骤使用 curated retrieval eval set 评估当前 keyword retrieval，不调用外部 API、embedding model 或 vector database。评测集每条 JSONL 记录包含 `query_id`、`query`、检索意图、目标 chunk metadata、可选过滤条件和 `metrics_at`。当前报告包含 `hit@k`、`must_hit@k`、`recall@k`、MRR 和失败 query 明细；后续 vector retriever 可以复用同一 eval set。
+
+如需把检索质量作为回归检查，可以启用 strict mode：
+
+```bash
+uv run python scripts/evaluate_rag_retrieval.py \
+  --chunks rag/chunks.jsonl \
+  --eval-set rag/retrieval_eval_set.jsonl \
+  --report rag/retrieval_eval_report.md \
+  --strict \
+  --min-hit-at-5 0.80 \
+  --min-mrr 0.50
+```
+
 ---
 
 ## 当前已跑通结果
@@ -277,4 +313,5 @@ rag/minimal_rag_build_report.md
 - 下载并处理 3 篇核心实时 GNSS / HR-GNSS 论文；
 - 生成 3 篇结构化 reading notes；
 - 生成 1 篇三论文 synthesis；
-- 构建 81 条最小 RAG chunks。
+- 构建 81 条最小 RAG chunks；
+- 增加 RAG 检索评测集，可用 keyword retriever 生成 deterministic retrieval report。
