@@ -18,8 +18,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts import (
     build_minimal_rag_chunks,
+    compare_rag_retrieval,
     download_pdfs,
     evaluate_parse_quality,
+    evaluate_rag_retrieval,
     match_manual_pdfs,
     parse_pdfs,
     screen_candidates,
@@ -27,7 +29,7 @@ from scripts import (
 )
 
 BASE_DIR = PROJECT_ROOT
-STAGES = ["search", "screen", "download", "match_manual", "parse", "parse_quality", "rag"]
+STAGES = ["search", "screen", "download", "match_manual", "parse", "parse_quality", "rag", "rag_eval", "rag_compare"]
 SKIP_FLAGS = {
     "search": "skip_search",
     "screen": "skip_screen",
@@ -36,6 +38,8 @@ SKIP_FLAGS = {
     "parse": "skip_parse",
     "parse_quality": "skip_parse_quality",
     "rag": "skip_rag",
+    "rag_eval": "skip_rag_eval",
+    "rag_compare": "skip_rag_compare",
 }
 
 
@@ -154,10 +158,41 @@ def run_rag(args: argparse.Namespace) -> None:
     print(f"Built {len(chunks)} RAG chunks")
 
 
+def run_rag_eval(args: argparse.Namespace) -> None:
+    print("==> rag_eval")
+    results = evaluate_rag_retrieval.run(
+        chunks_path=resolve_path(args.rag_eval_chunks),
+        eval_set_path=resolve_path(args.rag_eval_set),
+        report_path=resolve_path(args.rag_eval_report),
+        json_output_path=resolve_path(args.rag_eval_json),
+        retriever_name=args.rag_eval_retriever,
+        limit=args.rag_eval_limit,
+        strict=args.rag_eval_strict,
+        min_hit_at_5=args.rag_eval_min_hit_at_5 if args.rag_eval_strict else None,
+        min_mrr=args.rag_eval_min_mrr if args.rag_eval_strict else None,
+    )
+    print(f"Evaluated {results['summary']['num_queries']} RAG retrieval queries")
+
+
+def run_rag_compare(args: argparse.Namespace) -> None:
+    print("==> rag_compare")
+    results = compare_rag_retrieval.run(
+        chunks_path=resolve_path(args.rag_compare_chunks),
+        eval_set_path=resolve_path(args.rag_compare_eval_set),
+        report_path=resolve_path(args.rag_compare_report),
+        json_output_path=resolve_path(args.rag_compare_json),
+        retrievers=args.rag_compare_retrievers,
+        strict=args.rag_compare_strict,
+        min_hit_at_5=args.rag_compare_min_hit_at_5 if args.rag_compare_strict else None,
+        min_mrr=args.rag_compare_min_mrr if args.rag_compare_strict else None,
+    )
+    print(f"Compared {len(results['retrievers'])} RAG retrievers")
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the literature-reading pipeline from search through RAG chunks.")
+    parser = argparse.ArgumentParser(description="Run the literature-reading pipeline from search through RAG evaluation.")
     parser.add_argument("--from-stage", choices=STAGES, default="search")
-    parser.add_argument("--to-stage", choices=STAGES, default="rag")
+    parser.add_argument("--to-stage", choices=STAGES, default="rag_compare")
     parser.add_argument("--skip-search", action="store_true")
     parser.add_argument("--skip-screen", action="store_true")
     parser.add_argument("--skip-download", action="store_true")
@@ -165,6 +200,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-parse", action="store_true")
     parser.add_argument("--skip-parse-quality", action="store_true")
     parser.add_argument("--skip-rag", action="store_true")
+    parser.add_argument("--skip-rag-eval", action="store_true")
+    parser.add_argument("--skip-rag-compare", action="store_true")
 
     parser.add_argument("--dry-run", action="store_true", help="Dry run stages that support it, such as download and manual matching.")
     parser.add_argument("--match-manual", action="store_true", help="Opt in to matching user-local manual PDFs.")
@@ -213,6 +250,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rag-exclude-low-quality", action="store_true")
     parser.add_argument("--rag-quality-path", type=Path, default=evaluate_parse_quality.DEFAULT_OUTPUT)
     parser.add_argument("--rag-quality-min-score", type=int, default=evaluate_parse_quality.DEFAULT_MIN_SCORE)
+
+    parser.add_argument("--rag-eval-chunks", type=Path, default=evaluate_rag_retrieval.DEFAULT_CHUNKS)
+    parser.add_argument("--rag-eval-set", type=Path, default=evaluate_rag_retrieval.DEFAULT_EVAL_SET)
+    parser.add_argument("--rag-eval-report", type=Path, default=evaluate_rag_retrieval.DEFAULT_REPORT)
+    parser.add_argument("--rag-eval-json", type=Path, default=BASE_DIR / "rag" / "retrieval_eval_results.json")
+    parser.add_argument("--rag-eval-retriever", choices=sorted(evaluate_rag_retrieval.RETRIEVERS), default="keyword")
+    parser.add_argument("--rag-eval-limit", type=int, default=None)
+    parser.add_argument("--rag-eval-strict", action="store_true")
+    parser.add_argument("--rag-eval-min-hit-at-5", type=float, default=evaluate_rag_retrieval.DEFAULT_MIN_HIT_AT_5)
+    parser.add_argument("--rag-eval-min-mrr", type=float, default=evaluate_rag_retrieval.DEFAULT_MIN_MRR)
+
+    parser.add_argument("--rag-compare-chunks", type=Path, default=compare_rag_retrieval.DEFAULT_CHUNKS)
+    parser.add_argument("--rag-compare-eval-set", type=Path, default=compare_rag_retrieval.DEFAULT_EVAL_SET)
+    parser.add_argument("--rag-compare-report", type=Path, default=compare_rag_retrieval.DEFAULT_REPORT)
+    parser.add_argument("--rag-compare-json", type=Path, default=BASE_DIR / "rag" / "retrieval_compare_results.json")
+    parser.add_argument("--rag-compare-retrievers", nargs="+", choices=sorted(evaluate_rag_retrieval.RETRIEVERS), default=compare_rag_retrieval.DEFAULT_RETRIEVERS)
+    parser.add_argument("--rag-compare-strict", action="store_true")
+    parser.add_argument("--rag-compare-min-hit-at-5", type=float, default=compare_rag_retrieval.DEFAULT_MIN_HIT_AT_5)
+    parser.add_argument("--rag-compare-min-mrr", type=float, default=compare_rag_retrieval.DEFAULT_MIN_MRR)
+
     parser.add_argument("rag_inputs", nargs="*", type=Path, default=build_minimal_rag_chunks.DEFAULT_INPUTS)
     return parser.parse_args()
 
@@ -227,6 +284,8 @@ def main() -> None:
         "parse": run_parse,
         "parse_quality": run_parse_quality,
         "rag": run_rag,
+        "rag_eval": run_rag_eval,
+        "rag_compare": run_rag_compare,
     }
     stages = selected_stages(args)
     print(f"Pipeline stages: {', '.join(stages) if stages else '(none)'}")

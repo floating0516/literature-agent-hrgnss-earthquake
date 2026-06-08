@@ -18,7 +18,7 @@ class RunPipelineCliTests(unittest.TestCase):
             args = run_pipeline.parse_args()
 
         self.assertEqual(args.from_stage, "search")
-        self.assertEqual(args.to_stage, "rag")
+        self.assertEqual(args.to_stage, "rag_compare")
         self.assertFalse(args.match_manual)
         self.assertEqual(args.parse_backend, "pymupdf4llm")
 
@@ -51,10 +51,10 @@ class RunPipelineCliTests(unittest.TestCase):
         self.assertEqual(run_pipeline.selected_stages(args), ["download", "match_manual", "parse"])
 
     def test_skip_flags_remove_matching_stages(self):
-        with patch.object(sys, "argv", ["run_pipeline.py", "--skip-download", "--skip-parse"]):
+        with patch.object(sys, "argv", ["run_pipeline.py", "--skip-download", "--skip-parse", "--skip-rag-eval"]):
             args = run_pipeline.parse_args()
 
-        self.assertEqual(run_pipeline.selected_stages(args), ["search", "screen", "parse_quality", "rag"])
+        self.assertEqual(run_pipeline.selected_stages(args), ["search", "screen", "parse_quality", "rag", "rag_compare"])
 
     def test_help_command_succeeds(self):
         result = subprocess.run(
@@ -69,6 +69,10 @@ class RunPipelineCliTests(unittest.TestCase):
         self.assertIn("Run the literature-reading pipeline", result.stdout)
         self.assertIn("--from-stage", result.stdout)
         self.assertIn("--parse-backend", result.stdout)
+        self.assertIn("rag_eval", result.stdout)
+        self.assertIn("rag_compare", result.stdout)
+        self.assertIn("--rag-eval-retriever", result.stdout)
+        self.assertIn("--rag-compare-retrievers", result.stdout)
 
 
 class RunPipelineExecutionTests(unittest.TestCase):
@@ -83,11 +87,13 @@ class RunPipelineExecutionTests(unittest.TestCase):
             patch("scripts.run_pipeline.run_parse", side_effect=lambda args: events.append("parse")),
             patch("scripts.run_pipeline.run_parse_quality", side_effect=lambda args: events.append("parse_quality")),
             patch("scripts.run_pipeline.run_rag", side_effect=lambda args: events.append("rag")),
+            patch("scripts.run_pipeline.run_rag_eval", side_effect=lambda args: events.append("rag_eval")),
+            patch("scripts.run_pipeline.run_rag_compare", side_effect=lambda args: events.append("rag_compare")),
             patch.object(sys, "argv", ["run_pipeline.py", "--match-manual"]),
         ):
             run_pipeline.main()
 
-        self.assertEqual(events, ["search", "screen", "download", "match_manual", "parse", "parse_quality", "rag"])
+        self.assertEqual(events, ["search", "screen", "download", "match_manual", "parse", "parse_quality", "rag", "rag_eval", "rag_compare"])
 
     def test_pipeline_skips_manual_match_by_default(self):
         events = []
@@ -100,11 +106,13 @@ class RunPipelineExecutionTests(unittest.TestCase):
             patch("scripts.run_pipeline.run_parse", side_effect=lambda args: events.append("parse")),
             patch("scripts.run_pipeline.run_parse_quality", side_effect=lambda args: events.append("parse_quality")),
             patch("scripts.run_pipeline.run_rag", side_effect=lambda args: events.append("rag")),
+            patch("scripts.run_pipeline.run_rag_eval", side_effect=lambda args: events.append("rag_eval")),
+            patch("scripts.run_pipeline.run_rag_compare", side_effect=lambda args: events.append("rag_compare")),
             patch.object(sys, "argv", ["run_pipeline.py"]),
         ):
             run_pipeline.main()
 
-        self.assertEqual(events, ["search", "screen", "download", "parse", "parse_quality", "rag"])
+        self.assertEqual(events, ["search", "screen", "download", "parse", "parse_quality", "rag", "rag_eval", "rag_compare"])
 
     def test_dry_run_is_passed_to_download_config(self):
         with patch("scripts.run_pipeline.download_pdfs.run") as run_download, patch.object(
@@ -167,6 +175,55 @@ class RunPipelineExecutionTests(unittest.TestCase):
         self.assertIn(parsed_file, run_rag.call_args.kwargs["input_paths"])
         self.assertTrue(run_rag.call_args.kwargs["exclude_low_quality"])
         self.assertEqual(run_rag.call_args.kwargs["min_quality_score"], 75)
+
+    def test_rag_eval_stage_calls_evaluator(self):
+        fake_results = {"summary": {"num_queries": 2}}
+        with patch("scripts.run_pipeline.evaluate_rag_retrieval.run", return_value=fake_results) as run_eval, patch.object(
+            sys,
+            "argv",
+            [
+                "run_pipeline.py",
+                "--from-stage",
+                "rag_eval",
+                "--to-stage",
+                "rag_eval",
+                "--rag-eval-retriever",
+                "hybrid",
+                "--rag-eval-strict",
+                "--rag-eval-min-mrr",
+                "0.7",
+            ],
+        ):
+            run_pipeline.main()
+
+        self.assertEqual(run_eval.call_args.kwargs["retriever_name"], "hybrid")
+        self.assertTrue(run_eval.call_args.kwargs["strict"])
+        self.assertEqual(run_eval.call_args.kwargs["min_mrr"], 0.7)
+
+    def test_rag_compare_stage_calls_comparer(self):
+        fake_results = {"retrievers": ["keyword", "hybrid"]}
+        with patch("scripts.run_pipeline.compare_rag_retrieval.run", return_value=fake_results) as run_compare, patch.object(
+            sys,
+            "argv",
+            [
+                "run_pipeline.py",
+                "--from-stage",
+                "rag_compare",
+                "--to-stage",
+                "rag_compare",
+                "--rag-compare-retrievers",
+                "keyword",
+                "hybrid",
+                "--rag-compare-strict",
+                "--rag-compare-min-hit-at-5",
+                "0.9",
+            ],
+        ):
+            run_pipeline.main()
+
+        self.assertEqual(run_compare.call_args.kwargs["retrievers"], ["keyword", "hybrid"])
+        self.assertTrue(run_compare.call_args.kwargs["strict"])
+        self.assertEqual(run_compare.call_args.kwargs["min_hit_at_5"], 0.9)
 
 
 if __name__ == "__main__":
