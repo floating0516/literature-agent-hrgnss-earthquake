@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.search_rag_chunks import SearchFilters, load_chunks, search_chunks
-from scripts.vector_rag_retrieval import vector_search_chunks
+from scripts.vector_rag_retrieval import hybrid_search_chunks, vector_search_chunks
 
 BASE_DIR = PROJECT_ROOT
 DEFAULT_CHUNKS = BASE_DIR / "rag" / "chunks.jsonl"
@@ -165,7 +165,11 @@ def vector_retriever(chunks: list[dict[str, Any]], case: EvalCase, limit: int) -
     return vector_search_chunks(chunks, case.query, limit=limit, filters=case.filters)
 
 
-RETRIEVERS: dict[str, Retriever] = {"keyword": keyword_retriever, "vector": vector_retriever}
+def hybrid_retriever(chunks: list[dict[str, Any]], case: EvalCase, limit: int) -> list[dict[str, Any]]:
+    return hybrid_search_chunks(chunks, case.query, limit=limit, filters=case.filters)
+
+
+RETRIEVERS: dict[str, Retriever] = {"keyword": keyword_retriever, "vector": vector_retriever, "hybrid": hybrid_retriever}
 
 
 def evaluate_case(

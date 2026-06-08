@@ -89,6 +89,71 @@ class VectorRagRetrievalTests(unittest.TestCase):
 
         self.assertEqual([result["chunk"]["chunk_id"] for result in results], ["chunk-a", "chunk-b", "chunk-c"])
 
+    def test_hybrid_search_returns_keyword_compatible_result_shape(self):
+        chunks = [chunk("chunk-a", "Bayesian uncertainty method for earthquake location.")]
+
+        results = vector_search.hybrid_search_chunks(chunks, "bayesian uncertainty", limit=1)
+
+        self.assertEqual(len(results), 1)
+        self.assertIn("score", results[0])
+        self.assertIn("chunk", results[0])
+        self.assertEqual(results[0]["chunk"]["chunk_id"], "chunk-a")
+        self.assertGreater(results[0]["score"], 0)
+
+    def test_hybrid_search_fuses_keyword_and_vector_signals(self):
+        chunks = [
+            chunk("chunk-a", "Bayesian Bayesian Bayesian method.", section="Background", tags=["background"], chunk_index=1),
+            chunk("chunk-b", "Bayesian uncertainty earthquake location method.", section="Method", tags=["method"], chunk_index=2),
+        ]
+
+        results = vector_search.hybrid_search_chunks(chunks, "bayesian uncertainty method", limit=2)
+
+        self.assertEqual(results[0]["chunk"]["chunk_id"], "chunk-b")
+        self.assertGreater(results[0]["score"], results[1]["score"])
+
+    def test_hybrid_search_includes_keyword_and_vector_candidates(self):
+        chunks = [
+            chunk("chunk-a", "GNSS magnitude method.", tags=["method"], chunk_index=1),
+            chunk("chunk-b", "High-rate displacement observations.", tags=["dataset"], chunk_index=2),
+        ]
+
+        results = vector_search.hybrid_search_chunks(chunks, "GNSS displacement", limit=2)
+
+        self.assertEqual({result["chunk"]["chunk_id"] for result in results}, {"chunk-a", "chunk-b"})
+
+    def test_hybrid_search_filters_by_source_type_tag_and_paper_id(self):
+        chunks = [
+            chunk("chunk-a", "GNSS magnitude method.", paper_id="paper-a", source_type="reading_note", tags=["method"]),
+            chunk("chunk-b", "GNSS magnitude limitation.", paper_id="paper-b", source_type="synthesis", tags=["limitation"]),
+        ]
+
+        results = vector_search.hybrid_search_chunks(
+            chunks,
+            "GNSS magnitude",
+            filters=SearchFilters(source_type="synthesis", tag="limitation", paper_id="paper-b"),
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["chunk"]["chunk_id"], "chunk-b")
+
+    def test_hybrid_search_returns_empty_list_for_no_token_overlap(self):
+        chunks = [chunk("chunk-a", "Bayesian uncertainty method.")]
+
+        results = vector_search.hybrid_search_chunks(chunks, "volcano tsunami", limit=3)
+
+        self.assertEqual(results, [])
+
+    def test_hybrid_search_uses_deterministic_tie_breakers(self):
+        chunks = [
+            chunk("chunk-c", "GNSS magnitude method.", chunk_index=2),
+            chunk("chunk-b", "GNSS magnitude method.", chunk_index=1),
+            chunk("chunk-a", "GNSS magnitude method.", chunk_index=1),
+        ]
+
+        results = vector_search.hybrid_search_chunks(chunks, "GNSS magnitude", limit=3)
+
+        self.assertEqual([result["chunk"]["chunk_id"] for result in results], ["chunk-a", "chunk-b", "chunk-c"])
+
     def test_cosine_similarity_handles_empty_vectors(self):
         self.assertEqual(vector_search.cosine_similarity({}, {}), 0.0)
         self.assertEqual(vector_search.cosine_similarity({"gnss": 1.0}, {}), 0.0)

@@ -298,7 +298,18 @@ uv run python scripts/evaluate_rag_retrieval.py \
   --json-output rag/retrieval_eval_vector_results.json
 ```
 
-如需保留 keyword/vector 对照报告，可分别输出到不同文件：
+还可以评估 keyword + vector 分数融合的 hybrid baseline：
+
+```bash
+uv run python scripts/evaluate_rag_retrieval.py \
+  --retriever hybrid \
+  --chunks rag/chunks.jsonl \
+  --eval-set rag/retrieval_eval_set.jsonl \
+  --report rag/retrieval_eval_hybrid_report.md \
+  --json-output rag/retrieval_eval_hybrid_results.json
+```
+
+如需保留 keyword/vector/hybrid 对照报告，可分别输出到不同文件：
 
 ```bash
 uv run python scripts/evaluate_rag_retrieval.py \
@@ -316,9 +327,11 @@ rag/retrieval_eval_report.md
 rag/retrieval_eval_results.json
 rag/retrieval_eval_vector_report.md
 rag/retrieval_eval_vector_results.json
+rag/retrieval_eval_hybrid_report.md
+rag/retrieval_eval_hybrid_results.json
 ```
 
-该步骤使用 curated retrieval eval set 评估当前 RAG retrieval，不调用外部 API、embedding model 或 vector database。评测集每条 JSONL 记录包含 `query_id`、`query`、检索意图、目标 chunk metadata、可选过滤条件和 `metrics_at`。当前报告包含 `hit@k`、`must_hit@k`、`recall@k`、MRR 和失败 query 明细。`keyword` 是关键词计数 baseline；`vector` 是本地稀疏词频向量 + cosine similarity baseline，不是神经 embedding 模型，不需要联网或下载模型。后续本地 embedding 或 vector DB backend 可以复用同一 eval set。
+该步骤使用 curated retrieval eval set 评估当前 RAG retrieval，不调用外部 API、embedding model 或 vector database。评测集每条 JSONL 记录包含 `query_id`、`query`、检索意图、目标 chunk metadata、可选过滤条件和 `metrics_at`。当前报告包含 `hit@k`、`must_hit@k`、`recall@k`、MRR 和失败 query 明细。`keyword` 是关键词计数 baseline；`vector` 是本地稀疏词频向量 + cosine similarity baseline；`hybrid` 是对 keyword 和 vector 候选做归一化分数融合的 baseline。这些 retriever 都不需要联网、下载模型或引入新依赖。后续本地 embedding 或 vector DB backend 可以复用同一 eval set。
 
 如需把检索质量作为回归检查，可以启用 strict mode：
 
@@ -342,4 +355,4 @@ uv run python scripts/evaluate_rag_retrieval.py \
 - 生成 3 篇结构化 reading notes；
 - 生成 1 篇三论文 synthesis；
 - 构建 81 条最小 RAG chunks；
-- 增加 RAG 检索评测集，可用 keyword / offline lexical-vector retriever 生成 deterministic retrieval report。
+- 增加 RAG 检索评测集，可用 keyword / offline lexical-vector / hybrid retriever 生成 deterministic retrieval report。

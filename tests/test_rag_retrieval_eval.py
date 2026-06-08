@@ -167,6 +167,29 @@ class RagRetrievalEvalMetricTests(unittest.TestCase):
         self.assertEqual(results["per_query"][0]["retrieved_chunk_ids"][0], "chunk-a")
         self.assertEqual(results["summary"]["mean_hit@1"], 1.0)
 
+    def test_hybrid_retriever_is_registered_and_uses_filters(self):
+        self.assertIn("hybrid", evaluator.RETRIEVERS)
+        chunks = [
+            chunk("chunk-a", "Bayesian deep learning uncertainty method.", tags=["method"], chunk_index=1),
+            chunk("chunk-b", "High-rate GNSS permanent displacement dataset.", tags=["dataset"], chunk_index=2),
+        ]
+        case = evaluator.EvalCase(
+            query_id="case-a",
+            query="bayesian uncertainty",
+            intent="Find method.",
+            must_retrieve=[{"paper_id": "paper-a", "tag": "method"}],
+            relevant=[{"paper_id": "paper-a", "tag": "method"}],
+            acceptable=[],
+            filters=SearchFilters(tag="method"),
+            metrics_at=[1, 3],
+        )
+
+        results = evaluator.evaluate_cases([case], chunks, retriever_name="hybrid")
+
+        self.assertEqual(results["retriever"], "hybrid")
+        self.assertEqual(results["per_query"][0]["retrieved_chunk_ids"][0], "chunk-a")
+        self.assertEqual(results["summary"]["mean_hit@1"], 1.0)
+
     def test_evaluate_case_computes_hits_recall_and_mrr(self):
         chunks = [
             chunk("chunk-a", "Bayesian deep learning uncertainty method.", tags=["method"], chunk_index=1),
@@ -341,6 +364,58 @@ class RagRetrievalEvalReportTests(unittest.TestCase):
             self.assertTrue(json_path.exists())
             payload = json.loads(json_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["retriever"], "vector")
+
+    def test_cli_hybrid_retriever_writes_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            chunks_path = tmp_path / "chunks.jsonl"
+            eval_path = tmp_path / "eval.jsonl"
+            report_path = tmp_path / "report.md"
+            json_path = tmp_path / "results.json"
+            write_jsonl(chunks_path, [chunk("chunk-a", "Bayesian deep learning uncertainty method.")])
+            write_jsonl(eval_path, [eval_record()])
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/evaluate_rag_retrieval.py",
+                    "--chunks",
+                    str(chunks_path),
+                    "--eval-set",
+                    str(eval_path),
+                    "--report",
+                    str(report_path),
+                    "--json-output",
+                    str(json_path),
+                    "--retriever",
+                    "hybrid",
+                ],
+                cwd=PROJECT_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Evaluated 1 queries", result.stdout)
+            self.assertIn("with hybrid retriever", result.stdout)
+            self.assertTrue(report_path.exists())
+            self.assertTrue(json_path.exists())
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["retriever"], "hybrid")
+
+    def test_cli_help_lists_hybrid_retriever(self):
+        result = subprocess.run(
+            [sys.executable, "scripts/evaluate_rag_retrieval.py", "--help"],
+            cwd=PROJECT_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("hybrid", result.stdout)
+        self.assertIn("keyword", result.stdout)
 
     def test_cli_strict_mode_fails_when_threshold_is_not_met(self):
         with tempfile.TemporaryDirectory() as tmp:
