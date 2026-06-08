@@ -1,4 +1,7 @@
+import json
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -157,6 +160,46 @@ class VectorRagRetrievalTests(unittest.TestCase):
     def test_cosine_similarity_handles_empty_vectors(self):
         self.assertEqual(vector_search.cosine_similarity({}, {}), 0.0)
         self.assertEqual(vector_search.cosine_similarity({"gnss": 1.0}, {}), 0.0)
+
+    def test_cli_help_succeeds_when_script_is_run_directly(self):
+        result = subprocess.run(
+            [sys.executable, "scripts/vector_rag_retrieval.py", "--help"],
+            cwd=PROJECT_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--retriever", result.stdout)
+        self.assertIn("hybrid", result.stdout)
+
+    def test_cli_vector_search_returns_json_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chunks_path = Path(tmp) / "chunks.jsonl"
+            chunks_path.write_text(
+                json.dumps(chunk("chunk-a", "Bayesian uncertainty method."), ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/vector_rag_retrieval.py",
+                    "bayesian uncertainty",
+                    "--chunks",
+                    str(chunks_path),
+                    "--json",
+                ],
+                cwd=PROJECT_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload[0]["chunk"]["chunk_id"], "chunk-a")
 
 
 if __name__ == "__main__":
