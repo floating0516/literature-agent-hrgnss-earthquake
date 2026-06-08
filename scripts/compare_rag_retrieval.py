@@ -51,12 +51,21 @@ def summarize_run(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def top_retrieved_detail(item: dict[str, Any]) -> dict[str, Any]:
+    if not item.get("retrieved"):
+        return {"chunk_id": "", "tags": [], "section": "", "score": ""}
+    top = item["retrieved"][0]
+    return {
+        "chunk_id": top.get("chunk_id", ""),
+        "tags": top.get("tags", []),
+        "section": top.get("section", ""),
+        "score": top.get("score", ""),
+    }
+
+
 def compare_per_query(runs: dict[str, dict[str, Any]], retrievers: list[str]) -> list[dict[str, Any]]:
     query_ids = [item["query_id"] for item in runs[retrievers[0]]["per_query"]]
-    indexed = {
-        retriever: {item["query_id"]: item for item in runs[retriever]["per_query"]}
-        for retriever in retrievers
-    }
+    indexed = {retriever: {item["query_id"]: item for item in runs[retriever]["per_query"]} for retriever in retrievers}
     comparisons = []
     for query_id in query_ids:
         row: dict[str, Any] = {"query_id": query_id, "retrievers": {}}
@@ -64,6 +73,7 @@ def compare_per_query(runs: dict[str, dict[str, Any]], retrievers: list[str]) ->
         winners = []
         for retriever in retrievers:
             item = indexed[retriever][query_id]
+            detail = top_retrieved_detail(item)
             mrr = float(item.get("mrr", 0.0))
             if mrr == best_mrr:
                 winners.append(retriever)
@@ -72,11 +82,70 @@ def compare_per_query(runs: dict[str, dict[str, Any]], retrievers: list[str]) ->
                 "must_hit@5": item.get("must_hit@5", 0),
                 "mrr": item.get("mrr", 0.0),
                 "top_rank": item.get("top_rank"),
-                "top_retrieved": item["retrieved_chunk_ids"][0] if item.get("retrieved_chunk_ids") else "",
+                "top_retrieved": detail["chunk_id"],
+                "top_retrieved_tags": detail["tags"],
+                "top_retrieved_section": detail["section"],
+                "top_retrieved_score": detail["score"],
             }
         row["best_by_mrr"] = winners
         comparisons.append(row)
     return comparisons
+
+
+def regression_entry(query_id: str, baseline_name: str, baseline: dict[str, Any], hybrid: dict[str, Any]) -> dict[str, Any]:
+    baseline_mrr = float(baseline.get("mrr", 0.0))
+    hybrid_mrr = float(hybrid.get("mrr", 0.0))
+    return {
+        "query_id": query_id,
+        "baseline": baseline_name,
+        f"{baseline_name}_mrr": baseline_mrr,
+        "hybrid_mrr": hybrid_mrr,
+        "mrr_delta": round(hybrid_mrr - baseline_mrr, 6),
+        f"{baseline_name}_must_hit@5": baseline.get("must_hit@5", 0),
+        "hybrid_must_hit@5": hybrid.get("must_hit@5", 0),
+        f"{baseline_name}_top_retrieved": baseline.get("top_retrieved", ""),
+        "hybrid_top_retrieved": hybrid.get("top_retrieved", ""),
+    }
+
+
+def build_diagnostics(runs: dict[str, dict[str, Any]], retrievers: list[str], per_query: list[dict[str, Any]]) -> dict[str, Any]:
+    failed_by_retriever = {retriever: runs[retriever]["summary"].get("failed_queries", []) for retriever in retrievers}
+    diagnostics: dict[str, Any] = {
+        "failed_by_retriever": failed_by_retriever,
+        "hybrid_regressions_vs_keyword": [],
+        "hybrid_regressions_vs_vector": [],
+        "must_hit_disagreements": [],
+    }
+    if "hybrid" not in retrievers:
+        return diagnostics
+
+    for row in per_query:
+        query_id = row["query_id"]
+        retriever_rows = row["retrievers"]
+        hybrid = retriever_rows["hybrid"]
+        for baseline_name in ("keyword", "vector"):
+            if baseline_name not in retriever_rows:
+                continue
+            baseline = retriever_rows[baseline_name]
+            mrr_regressed = float(hybrid.get("mrr", 0.0)) < float(baseline.get("mrr", 0.0))
+            must_regressed = int(hybrid.get("must_hit@5", 0)) < int(baseline.get("must_hit@5", 0))
+            if mrr_regressed or must_regressed:
+                diagnostics[f"hybrid_regressions_vs_{baseline_name}"].append(regression_entry(query_id, baseline_name, baseline, hybrid))
+        for retriever, item in retriever_rows.items():
+            if int(item.get("hit@5", 0)) == 1 and int(item.get("must_hit@5", 0)) == 0:
+                diagnostics["must_hit_disagreements"].append(
+                    {
+                        "query_id": query_id,
+                        "retriever": retriever,
+                        "hit@5": item.get("hit@5", 0),
+                        "must_hit@5": item.get("must_hit@5", 0),
+                        "mrr": item.get("mrr", 0.0),
+                        "top_retrieved": item.get("top_retrieved", ""),
+                        "top_retrieved_tags": item.get("top_retrieved_tags", []),
+                        "top_retrieved_section": item.get("top_retrieved_section", ""),
+                    }
+                )
+    return diagnostics
 
 
 def threshold_warnings(summary: dict[str, dict[str, Any]], min_hit_at_5: float | None, min_mrr: float | None) -> list[str]:
@@ -102,6 +171,17 @@ def escape_table(value: object) -> str:
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def markdown_retriever_cell(item: dict[str, Any]) -> str:
+    tags = ",".join(str(tag) for tag in item.get("top_retrieved_tags", []))
+    return (
+        f"`{escape_table(item.get('top_retrieved', ''))}` / "
+        f"rank {item.get('top_rank') or ''} / "
+        f"MRR {format_float(item.get('mrr', 0.0))} / "
+        f"must@5 {item.get('must_hit@5', 0)} / "
+        f"tags `{escape_table(tags)}`"
+    )
 
 
 def write_markdown_report(path: Path, results: dict[str, Any]) -> None:
@@ -139,23 +219,97 @@ def write_markdown_report(path: Path, results: dict[str, Any]) -> None:
             + " |"
         )
 
-    lines.extend(["", "## Per-query comparison", "", "| Query ID | Best by MRR | Keyword top/rank/MRR | Vector top/rank/MRR | Hybrid top/rank/MRR |", "|---|---|---|---|---|"])
+    lines.extend(
+        [
+            "",
+            "## Per-query comparison",
+            "",
+            "| Query ID | Best by MRR | Keyword top/rank/MRR/must/tags | Vector top/rank/MRR/must/tags | Hybrid top/rank/MRR/must/tags |",
+            "|---|---|---|---|---|",
+        ]
+    )
     for row in results["per_query_comparison"]:
         cells = []
         for retriever in ["keyword", "vector", "hybrid"]:
-            item = row["retrievers"].get(retriever, {})
-            cells.append(f"`{escape_table(item.get('top_retrieved', ''))}` / {item.get('top_rank') or ''} / {format_float(item.get('mrr', 0.0))}")
+            cells.append(markdown_retriever_cell(row["retrievers"].get(retriever, {})))
         lines.append(
             "| "
-            + " | ".join(
-                [
-                    f"`{escape_table(row['query_id'])}`",
-                    ", ".join(row["best_by_mrr"]),
-                    *cells,
-                ]
-            )
+            + " | ".join([f"`{escape_table(row['query_id'])}`", ", ".join(row["best_by_mrr"]), *cells])
             + " |"
         )
+
+    diagnostics = results.get("diagnostics", {})
+    lines.extend(["", "## Hybrid regressions", ""])
+    regressions = diagnostics.get("hybrid_regressions_vs_keyword", []) + diagnostics.get("hybrid_regressions_vs_vector", [])
+    if not regressions:
+        lines.append("No hybrid regressions detected.")
+    else:
+        lines.extend(["| Query ID | Baseline | Baseline MRR | Hybrid MRR | MRR delta | Baseline must@5 | Hybrid must@5 |", "|---|---|---:|---:|---:|---:|---:|"])
+        for item in regressions:
+            baseline = item["baseline"]
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        f"`{escape_table(item['query_id'])}`",
+                        baseline,
+                        format_float(item.get(f"{baseline}_mrr", 0.0)),
+                        format_float(item.get("hybrid_mrr", 0.0)),
+                        format_float(item.get("mrr_delta", 0.0)),
+                        str(item.get(f"{baseline}_must_hit@5", 0)),
+                        str(item.get("hybrid_must_hit@5", 0)),
+                    ]
+                )
+                + " |"
+            )
+
+    lines.extend(["", "## Must-hit disagreements", ""])
+    disagreements = diagnostics.get("must_hit_disagreements", [])
+    if not disagreements:
+        lines.append("No must-hit disagreements detected.")
+    else:
+        lines.extend(["| Query ID | Retriever | MRR | Top retrieved | Tags | Section |", "|---|---|---:|---|---|---|"])
+        for item in disagreements:
+            tags = ",".join(str(tag) for tag in item.get("top_retrieved_tags", []))
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        f"`{escape_table(item['query_id'])}`",
+                        item["retriever"],
+                        format_float(item.get("mrr", 0.0)),
+                        f"`{escape_table(item.get('top_retrieved', ''))}`",
+                        f"`{escape_table(tags)}`",
+                        escape_table(item.get("top_retrieved_section", "")),
+                    ]
+                )
+                + " |"
+            )
+
+    lines.extend(["", "## Hybrid failed queries", ""])
+    hybrid_failed = diagnostics.get("failed_by_retriever", {}).get("hybrid", [])
+    if not hybrid_failed:
+        lines.append("No hybrid failed queries.")
+    else:
+        hybrid_rows = {row["query_id"]: row["retrievers"].get("hybrid", {}) for row in results["per_query_comparison"]}
+        lines.extend(["| Query ID | Hybrid top retrieved | Tags | Section | MRR | must@5 |", "|---|---|---|---|---:|---:|"])
+        for query_id in hybrid_failed:
+            item = hybrid_rows.get(query_id, {})
+            tags = ",".join(str(tag) for tag in item.get("top_retrieved_tags", []))
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        f"`{escape_table(query_id)}`",
+                        f"`{escape_table(item.get('top_retrieved', ''))}`",
+                        f"`{escape_table(tags)}`",
+                        escape_table(item.get("top_retrieved_section", "")),
+                        format_float(item.get("mrr", 0.0)),
+                        str(item.get("must_hit@5", 0)),
+                    ]
+                )
+                + " |"
+            )
 
     lines.extend(["", "## Warnings", ""])
     if results["warnings"]:
@@ -195,11 +349,10 @@ def run(
 
     chunks = load_chunks(resolved_chunks)
     cases = evaluator.load_eval_cases(resolved_eval_set)
-    runs = {
-        retriever: evaluator.evaluate_cases(cases, chunks, retriever_name=retriever)
-        for retriever in selected_retrievers
-    }
+    runs = {retriever: evaluator.evaluate_cases(cases, chunks, retriever_name=retriever) for retriever in selected_retrievers}
     comparison_summary = {retriever: summarize_run(runs[retriever]) for retriever in selected_retrievers}
+    per_query_comparison = compare_per_query(runs, selected_retrievers)
+    diagnostics = build_diagnostics(runs, selected_retrievers, per_query_comparison)
     warnings = threshold_warnings(comparison_summary, min_hit_at_5, min_mrr)
     results = {
         "chunks_path": display_path(resolved_chunks),
@@ -208,7 +361,8 @@ def run(
         "retrievers": selected_retrievers,
         "runs": runs,
         "comparison_summary": comparison_summary,
-        "per_query_comparison": compare_per_query(runs, selected_retrievers),
+        "per_query_comparison": per_query_comparison,
+        "diagnostics": diagnostics,
         "warnings": warnings,
     }
     if resolved_json:

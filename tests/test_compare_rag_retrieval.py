@@ -86,6 +86,74 @@ class CompareRagRetrievalTests(unittest.TestCase):
             payload = json.loads(json_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["retrievers"], ["keyword", "vector", "hybrid"])
 
+    def test_run_reports_failed_queries_by_retriever(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            chunks_path = tmp_path / "chunks.jsonl"
+            eval_path = tmp_path / "eval.jsonl"
+            report_path = tmp_path / "compare.md"
+            write_jsonl(chunks_path, [chunk("chunk-a", "Dataset only text.", tags=["dataset"])])
+            write_jsonl(eval_path, [eval_record(query="bayesian uncertainty", must_retrieve=[{"paper_id": "missing"}], relevant=[{"paper_id": "missing"}], filters={})])
+
+            results = comparer.run(chunks_path=chunks_path, eval_set_path=eval_path, report_path=report_path)
+
+            self.assertIn("diagnostics", results)
+            self.assertEqual(set(results["diagnostics"]["failed_by_retriever"]), {"keyword", "vector", "hybrid"})
+            self.assertEqual(results["diagnostics"]["failed_by_retriever"]["hybrid"], ["method_bayesian_uncertainty"])
+
+    def test_run_reports_hybrid_regressions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            chunks_path = tmp_path / "chunks.jsonl"
+            eval_path = tmp_path / "eval.jsonl"
+            report_path = tmp_path / "compare.md"
+            write_jsonl(
+                chunks_path,
+                [
+                    chunk("chunk-a", "Bayesian uncertainty method.", tags=["method"], chunk_index=1),
+                    chunk("chunk-b", "Bayesian uncertainty background.", tags=["background"], chunk_index=2),
+                ],
+            )
+            write_jsonl(eval_path, [eval_record()])
+
+            results = comparer.run(chunks_path=chunks_path, eval_set_path=eval_path, report_path=report_path)
+            results["per_query_comparison"][0]["retrievers"]["keyword"]["mrr"] = 1.0
+            results["per_query_comparison"][0]["retrievers"]["hybrid"]["mrr"] = 0.5
+            diagnostics = comparer.build_diagnostics(results["runs"], results["retrievers"], results["per_query_comparison"])
+
+            self.assertEqual(diagnostics["hybrid_regressions_vs_keyword"][0]["query_id"], "method_bayesian_uncertainty")
+            self.assertEqual(diagnostics["hybrid_regressions_vs_keyword"][0]["mrr_delta"], -0.5)
+
+    def test_run_reports_must_hit_disagreements(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            chunks_path = tmp_path / "chunks.jsonl"
+            eval_path = tmp_path / "eval.jsonl"
+            report_path = tmp_path / "compare.md"
+            write_jsonl(chunks_path, [chunk("chunk-a", "Bayesian uncertainty method.")])
+            write_jsonl(eval_path, [eval_record(must_retrieve=[{"paper_id": "missing"}], relevant=[{"paper_id": "paper-a"}], filters={})])
+
+            results = comparer.run(chunks_path=chunks_path, eval_set_path=eval_path, report_path=report_path)
+
+            disagreements = results["diagnostics"]["must_hit_disagreements"]
+            self.assertTrue(any(item["query_id"] == "method_bayesian_uncertainty" for item in disagreements))
+
+    def test_markdown_report_includes_hybrid_diagnostics_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            chunks_path = tmp_path / "chunks.jsonl"
+            eval_path = tmp_path / "eval.jsonl"
+            report_path = tmp_path / "compare.md"
+            write_jsonl(chunks_path, [chunk("chunk-a", "Bayesian deep learning uncertainty method.")])
+            write_jsonl(eval_path, [eval_record()])
+
+            comparer.run(chunks_path=chunks_path, eval_set_path=eval_path, report_path=report_path)
+
+            report = report_path.read_text(encoding="utf-8")
+            self.assertIn("## Hybrid regressions", report)
+            self.assertIn("## Must-hit disagreements", report)
+            self.assertIn("## Hybrid failed queries", report)
+
     def test_cli_writes_markdown_and_json_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
