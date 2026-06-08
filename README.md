@@ -333,7 +333,39 @@ rag/retrieval_eval_hybrid_results.json
 
 该步骤使用 curated retrieval eval set 评估当前 RAG retrieval，不调用外部 API、embedding model 或 vector database。评测集每条 JSONL 记录包含 `query_id`、`query`、检索意图、目标 chunk metadata、可选过滤条件和 `metrics_at`。当前报告包含 `hit@k`、`must_hit@k`、`recall@k`、MRR 和失败 query 明细。`keyword` 是关键词计数 baseline；`vector` 是本地稀疏词频向量 + cosine similarity baseline；`hybrid` 是对 keyword 和 vector 候选做归一化分数融合的 baseline。这些 retriever 都不需要联网、下载模型或引入新依赖。后续本地 embedding 或 vector DB backend 可以复用同一 eval set。
 
-如需把检索质量作为回归检查，可以启用 strict mode：
+如需一次性比较 keyword / vector / hybrid，可运行对比脚本：
+
+```bash
+uv run python scripts/compare_rag_retrieval.py \
+  --chunks rag/chunks.jsonl \
+  --eval-set rag/retrieval_eval_set.jsonl \
+  --report rag/retrieval_compare_report.md \
+  --json-output rag/retrieval_compare_results.json
+```
+
+输出：
+
+```text
+rag/retrieval_compare_report.md
+rag/retrieval_compare_results.json
+```
+
+`compare_rag_retrieval.py` 只负责 orchestration：它复用同一 eval set 和现有 keyword / vector / hybrid retriever，生成一个总览对比表、逐 query 对比和 warning 列表。该对比流程同样完全离线、deterministic，不下载模型、不调用远程 API、不需要 vector database。
+
+如需把多 retriever 检索质量作为回归检查，可以启用 compare strict mode：
+
+```bash
+uv run python scripts/compare_rag_retrieval.py \
+  --chunks rag/chunks.jsonl \
+  --eval-set rag/retrieval_eval_set.jsonl \
+  --report rag/retrieval_compare_report.md \
+  --json-output rag/retrieval_compare_results.json \
+  --strict \
+  --min-hit-at-5 0.80 \
+  --min-mrr 0.50
+```
+
+如需把单个 retriever 的检索质量作为回归检查，可以启用原有 strict mode：
 
 ```bash
 uv run python scripts/evaluate_rag_retrieval.py \

@@ -450,5 +450,35 @@ class RagRetrievalEvalReportTests(unittest.TestCase):
         self.assertIn("below threshold", result.stdout + result.stderr)
 
 
+class RagRetrievalEvalRepositoryTests(unittest.TestCase):
+    def test_repo_eval_set_has_minimum_case_count_and_coverage(self):
+        cases = evaluator.load_eval_cases(PROJECT_ROOT / "rag" / "retrieval_eval_set.jsonl")
+
+        self.assertGreaterEqual(len(cases), 30)
+        self.assertEqual(len({case.query_id for case in cases}), len(cases))
+        self.assertTrue(all(case.metrics_at == [1, 3, 5] for case in cases))
+
+        reading_note_cases = [case for case in cases if case.filters and case.filters.source_type == "reading_note"]
+        synthesis_cases = [case for case in cases if case.filters and case.filters.source_type == "synthesis"]
+        unfiltered_cases = [case for case in cases if case.filters is None or not any(evaluator.filters_to_dict(case.filters).values())]
+        tag_filtered_cases = [case for case in cases if case.filters and case.filters.tag]
+
+        self.assertGreaterEqual(len(reading_note_cases), 12)
+        self.assertGreaterEqual(len(synthesis_cases), 5)
+        self.assertGreaterEqual(len(unfiltered_cases), 4)
+        self.assertGreaterEqual(len(tag_filtered_cases), 8)
+
+    def test_repo_eval_set_targets_match_existing_chunks(self):
+        chunks = evaluator.load_chunks(PROJECT_ROOT / "rag" / "chunks.jsonl")
+        cases = evaluator.load_eval_cases(PROJECT_ROOT / "rag" / "retrieval_eval_set.jsonl")
+
+        for case in cases:
+            targets = case.must_retrieve + case.relevant
+            self.assertTrue(
+                any(evaluator.target_matched_by_chunks(target, chunks) for target in targets),
+                f"No target in {case.query_id} matches existing chunks",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
