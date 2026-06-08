@@ -2,11 +2,13 @@
 
 本目录用于设计和实现一个面向科研文献阅读、RAG 知识库构建与研究假说生成的 Agent 原型。
 
-当前已经跑通一个最小闭环：
+当前已经跑通一个可复现闭环：
 
 ```text
-paper search → screening → legal full text → parsing → reading note → synthesis → RAG chunks
+paper search → screening → open PDF download → parsing → parse quality → RAG chunks → retrieval eval → retrieval comparison
 ```
+
+阅读卡片和跨文献综合仍由人工/Agent 生成，用于补充 curated RAG 输入和研究判断。
 
 当前主题：**HR-GNSS + deep learning for rapid large-earthquake source characterization**。
 
@@ -39,7 +41,8 @@ AI_Agent_reading/
     search_rag_chunks.py       # 关键词检索 RAG chunks
     vector_rag_retrieval.py    # 离线 deterministic lexical-vector 检索 baseline
     evaluate_rag_retrieval.py  # 用 curated eval set 评估 RAG 检索
-    run_pipeline.py            # 串联搜索、筛选、下载、解析和 RAG 构建
+    compare_rag_retrieval.py   # 对比 keyword / vector / hybrid 检索质量
+    run_pipeline.py            # 串联搜索、筛选、下载、解析、RAG 构建和检索评估
 
   papers/                      # 当前主题的论文材料
     candidates.jsonl           # 搜索得到的候选元数据
@@ -72,6 +75,8 @@ AI_Agent_reading/
     retrieval_eval_set.jsonl
     retrieval_eval_report.md
     retrieval_eval_results.json
+    retrieval_compare_report.md
+    retrieval_compare_results.json
     embeddings_config.yaml
 
   reference_nature_agent/      # 最初参考的三篇 Nature Agent 论文和阅读报告
@@ -116,22 +121,73 @@ uv run python scripts/parse_pdfs.py
 
 ### 一键运行 pipeline
 
-可以使用总控脚本串联搜索、筛选、下载、解析和 RAG chunk 构建：
+可以使用总控脚本串联搜索、筛选、开放 PDF 下载、解析、解析质量评估、RAG chunk 构建、检索评估和多 retriever 对比：
 
 ```bash
 uv run python scripts/run_pipeline.py
 ```
 
+默认阶段顺序：
+
+```text
+search
+→ screen
+→ download
+→ parse
+→ parse_quality
+→ rag
+→ rag_eval
+→ rag_compare
+```
+
+如需把用户本地已有 PDF 纳入流程，可以显式启用人工匹配阶段：
+
+```bash
+uv run python scripts/run_pipeline.py --match-manual --manual-dir papers/manual_pdf_inbox
+```
+
+启用后阶段顺序变为：
+
+```text
+search
+→ screen
+→ download
+→ match_manual
+→ parse
+→ parse_quality
+→ rag
+→ rag_eval
+→ rag_compare
+```
+
 常用局部运行示例：
 
 ```bash
-uv run python scripts/run_pipeline.py --from-stage download --to-stage rag
-uv run python scripts/run_pipeline.py --to-stage parse --dry-run
-uv run python scripts/run_pipeline.py --match-manual --manual-dir papers/manual_pdf_inbox
-uv run python scripts/run_pipeline.py --rag-include-parsed-md --rag-exclude-low-quality
+# 只检查下载和人工匹配会做什么，不写入 PDF / 匹配结果
+uv run python scripts/run_pipeline.py --from-stage download --to-stage match_manual --match-manual --dry-run
+
+# 从下载开始，跑到 RAG 构建和检索评估
+uv run python scripts/run_pipeline.py --from-stage download --to-stage rag_compare
+
+# 只重建 RAG，并把 PDF 解析 Markdown 纳入输入，同时跳过低质量解析结果
+uv run python scripts/run_pipeline.py --from-stage rag --to-stage rag_compare --rag-include-parsed-md --rag-exclude-low-quality
+
+# 只重跑检索评估与 keyword/vector/hybrid 对比
+uv run python scripts/run_pipeline.py --from-stage rag_eval --to-stage rag_compare
+
+# 用 strict 阈值把检索质量作为回归检查
+uv run python scripts/run_pipeline.py \
+  --from-stage rag_eval \
+  --to-stage rag_compare \
+  --rag-eval-strict \
+  --rag-compare-strict \
+  --rag-eval-min-hit-at-5 0.80 \
+  --rag-eval-min-mrr 0.50 \
+  --rag-compare-min-hit-at-5 0.80 \
+  --rag-compare-min-mrr 0.50
 ```
 
-说明：手动 PDF 匹配默认关闭，只有传入 `--match-manual` 时才会扫描用户本地已有 PDF；该步骤不联网、不绕过 paywall 或任何访问控制。`--dry-run` 只对支持 dry run 的阶段生效，例如下载和手动匹配。pipeline 默认在 `parse` 和 `rag` 之间运行 `parse_quality`，生成 PDF 解析质量报告；解析后的 PDF Markdown 不会默认进入 curated RAG 输入，只有显式传入 `--rag-include-parsed-md` 时才会加入，且可用 `--rag-exclude-low-quality` 跳过低质量文件。
+说明：手动 PDF 匹配默认关闭，只有传入 `--match-manual` 时才会扫描用户本地已有 PDF；该步骤不联网、不绕过 paywall 或任何访问控制。`--dry-run` 只对支持 dry run 的阶段生效，例如下载和手动匹配。pipeline 默认在 `parse` 和 `rag` 之间运行 `parse_quality`，生成 PDF 解析质量报告；解析后的 PDF Markdown 不会默认进入 curated RAG 输入，只有显式传入 `--rag-include-parsed-md` 时才会加入，且可用 `--rag-exclude-low-quality` 跳过低质量文件。`rag_eval` 和 `rag_compare` 完全离线运行，复用本地 `rag/chunks.jsonl` 与 `rag/retrieval_eval_set.jsonl`，不调用外部 API、不下载 embedding model、不需要 vector database。
 
 ### 1. 搜索候选论文
 
@@ -333,6 +389,12 @@ rag/retrieval_eval_hybrid_results.json
 
 该步骤使用 curated retrieval eval set 评估当前 RAG retrieval，不调用外部 API、embedding model 或 vector database。评测集每条 JSONL 记录包含 `query_id`、`query`、检索意图、目标 chunk metadata、可选过滤条件和 `metrics_at`。当前报告包含 `hit@k`、`must_hit@k`、`recall@k`、MRR 和失败 query 明细。`keyword` 是关键词计数 baseline；`vector` 是本地稀疏词频向量 + cosine similarity baseline；`hybrid` 是对 keyword 和 vector 候选做归一化分数融合的 baseline。这些 retriever 都不需要联网、下载模型或引入新依赖。后续本地 embedding 或 vector DB backend 可以复用同一 eval set。
 
+也可以通过 pipeline 总控脚本运行同一评估步骤：
+
+```bash
+uv run python scripts/run_pipeline.py --from-stage rag_eval --to-stage rag_eval --rag-eval-retriever hybrid
+```
+
 如需一次性比较 keyword / vector / hybrid，可运行对比脚本：
 
 ```bash
@@ -350,7 +412,13 @@ rag/retrieval_compare_report.md
 rag/retrieval_compare_results.json
 ```
 
-`compare_rag_retrieval.py` 只负责 orchestration：它复用同一 eval set 和现有 keyword / vector / hybrid retriever，生成一个总览对比表、逐 query 对比和 warning 列表。该对比流程同样完全离线、deterministic，不下载模型、不调用远程 API、不需要 vector database。
+`compare_rag_retrieval.py` 只负责 orchestration：它复用同一 eval set 和现有 keyword / vector / hybrid retriever，生成一个总览对比表、逐 query 对比、hybrid 回退诊断、must-hit 分歧和 failed query 列表。该对比流程同样完全离线、deterministic，不下载模型、不调用远程 API、不需要 vector database。
+
+也可以通过 pipeline 总控脚本运行同一对比步骤：
+
+```bash
+uv run python scripts/run_pipeline.py --from-stage rag_compare --to-stage rag_compare
+```
 
 如需把多 retriever 检索质量作为回归检查，可以启用 compare strict mode：
 
@@ -375,6 +443,51 @@ uv run python scripts/evaluate_rag_retrieval.py \
   --strict \
   --min-hit-at-5 0.80 \
   --min-mrr 0.50
+```
+
+---
+
+## 外网访问与合规边界
+
+- `search` 阶段访问 OpenAlex，用于获取候选论文元数据。
+- `download` 阶段只下载元数据中已经存在的开放 PDF URL，例如记录中的 `pdf_url` 或 `best_oa_location.pdf_url`。
+- `download` 阶段不会使用机构登录、浏览器 cookie、验证码绕过、Cloudflare 绕过或任何 paywall 绕过方式。
+- `match_manual` 阶段默认关闭；只有显式传入 `--match-manual` 时才扫描用户本地目录中的 PDF。
+- `match_manual` 只复制和重命名用户本地已有 PDF，不联网下载，不判断或绕过访问权限。
+- `parse`、`parse_quality`、`rag`、`rag_eval`、`rag_compare` 都是本地离线步骤。
+
+---
+
+## 产物提交建议
+
+建议提交：
+
+```text
+README.md
+configs/*.yaml
+prompts/*.md
+scripts/*.py
+tests/*.py
+papers/*.jsonl                 # 论文元数据、筛选结果、下载结果等轻量结构化记录
+papers/*.md                    # 搜索、筛选、下载、解析日志和阅读报告
+papers/notes/*.md
+synthesis/*.md
+rag/*.jsonl                    # chunks 与 eval set
+rag/*.json                     # 检索评估/对比结果
+rag/*.md                       # RAG 构建、评估、对比报告
+```
+
+通常不建议提交，除非明确需要版本化原文材料：
+
+```text
+papers/raw_pdf/*.pdf
+papers/manual_pdf_inbox/*
+```
+
+不要提交本地 Claude / 会话锁文件，例如：
+
+```text
+.claude/scheduled_tasks.lock
 ```
 
 ---
