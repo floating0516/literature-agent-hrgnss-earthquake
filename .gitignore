@@ -10,8 +10,9 @@ papers/parsed_md/
 __pycache__/
 *.py[cod]
 
-# Local CodeGraph index
+# Local CodeGraph and Claude session state
 .codegraph/
+.claude/
 
 # macOS / editor files
 .DS_Store
