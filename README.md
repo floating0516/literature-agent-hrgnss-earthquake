@@ -37,6 +37,7 @@ AI_Agent_reading/
     parse_pdfs.py              # PDF 转 Markdown
     build_minimal_rag_chunks.py# 从阅读卡片和综合文档生成 RAG chunks
     search_rag_chunks.py       # 关键词检索 RAG chunks
+    vector_rag_retrieval.py    # 离线 deterministic lexical-vector 检索 baseline
     evaluate_rag_retrieval.py  # 用 curated eval set 评估 RAG 检索
     run_pipeline.py            # 串联搜索、筛选、下载、解析和 RAG 构建
 
@@ -275,12 +276,37 @@ rag/minimal_rag_build_report.md
 
 ### 9. 评估 RAG 检索
 
+默认评估 keyword baseline：
+
 ```bash
 uv run python scripts/evaluate_rag_retrieval.py \
+  --retriever keyword \
   --chunks rag/chunks.jsonl \
   --eval-set rag/retrieval_eval_set.jsonl \
   --report rag/retrieval_eval_report.md \
   --json-output rag/retrieval_eval_results.json
+```
+
+也可以用同一评测集评估离线 deterministic lexical-vector baseline：
+
+```bash
+uv run python scripts/evaluate_rag_retrieval.py \
+  --retriever vector \
+  --chunks rag/chunks.jsonl \
+  --eval-set rag/retrieval_eval_set.jsonl \
+  --report rag/retrieval_eval_vector_report.md \
+  --json-output rag/retrieval_eval_vector_results.json
+```
+
+如需保留 keyword/vector 对照报告，可分别输出到不同文件：
+
+```bash
+uv run python scripts/evaluate_rag_retrieval.py \
+  --retriever keyword \
+  --chunks rag/chunks.jsonl \
+  --eval-set rag/retrieval_eval_set.jsonl \
+  --report rag/retrieval_eval_keyword_report.md \
+  --json-output rag/retrieval_eval_keyword_results.json
 ```
 
 输出：
@@ -288,9 +314,11 @@ uv run python scripts/evaluate_rag_retrieval.py \
 ```text
 rag/retrieval_eval_report.md
 rag/retrieval_eval_results.json
+rag/retrieval_eval_vector_report.md
+rag/retrieval_eval_vector_results.json
 ```
 
-该步骤使用 curated retrieval eval set 评估当前 keyword retrieval，不调用外部 API、embedding model 或 vector database。评测集每条 JSONL 记录包含 `query_id`、`query`、检索意图、目标 chunk metadata、可选过滤条件和 `metrics_at`。当前报告包含 `hit@k`、`must_hit@k`、`recall@k`、MRR 和失败 query 明细；后续 vector retriever 可以复用同一 eval set。
+该步骤使用 curated retrieval eval set 评估当前 RAG retrieval，不调用外部 API、embedding model 或 vector database。评测集每条 JSONL 记录包含 `query_id`、`query`、检索意图、目标 chunk metadata、可选过滤条件和 `metrics_at`。当前报告包含 `hit@k`、`must_hit@k`、`recall@k`、MRR 和失败 query 明细。`keyword` 是关键词计数 baseline；`vector` 是本地稀疏词频向量 + cosine similarity baseline，不是神经 embedding 模型，不需要联网或下载模型。后续本地 embedding 或 vector DB backend 可以复用同一 eval set。
 
 如需把检索质量作为回归检查，可以启用 strict mode：
 
@@ -314,4 +342,4 @@ uv run python scripts/evaluate_rag_retrieval.py \
 - 生成 3 篇结构化 reading notes；
 - 生成 1 篇三论文 synthesis；
 - 构建 81 条最小 RAG chunks；
-- 增加 RAG 检索评测集，可用 keyword retriever 生成 deterministic retrieval report。
+- 增加 RAG 检索评测集，可用 keyword / offline lexical-vector retriever 生成 deterministic retrieval report。
