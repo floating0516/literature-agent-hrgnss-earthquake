@@ -464,6 +464,23 @@ def parse_args() -> argparse.Namespace:
         help=f"Report Markdown path. Default: {DEFAULT_REPORT}",
     )
     parser.add_argument(
+        "--quality-path",
+        type=Path,
+        default=None,
+        help="Parse quality JSONL path used when --exclude-low-quality is set.",
+    )
+    parser.add_argument(
+        "--exclude-low-quality",
+        action="store_true",
+        help="Skip inputs whose parse quality status is fail or score is below --min-quality-score.",
+    )
+    parser.add_argument(
+        "--min-quality-score",
+        type=int,
+        default=60,
+        help="Minimum parse quality score to keep when --exclude-low-quality is set.",
+    )
+    parser.add_argument(
         "inputs",
         nargs="*",
         type=Path,
@@ -479,6 +496,9 @@ def main() -> None:
         input_paths=args.inputs,
         output_path=args.output,
         report_path=args.report,
+        quality_path=args.quality_path,
+        exclude_low_quality=args.exclude_low_quality,
+        min_quality_score=args.min_quality_score,
     )
 
 

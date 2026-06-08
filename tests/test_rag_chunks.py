@@ -69,6 +69,69 @@ class RagChunkBuilderTests(unittest.TestCase):
 
         self.assertEqual(chunks[0]["tags"], ["method"])
 
+    def test_cli_exposes_parse_quality_filter_options(self):
+        result = subprocess.run(
+            [sys.executable, "scripts/build_minimal_rag_chunks.py", "--help"],
+            cwd=PROJECT_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--quality-path", result.stdout)
+        self.assertIn("--exclude-low-quality", result.stdout)
+        self.assertIn("--min-quality-score", result.stdout)
+
+    def test_cli_skips_low_quality_markdown_when_filter_options_are_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            good_path = tmp_path / "good.md"
+            bad_path = tmp_path / "bad.md"
+            output_path = tmp_path / "chunks.jsonl"
+            report_path = tmp_path / "report.md"
+            quality_path = tmp_path / "quality.jsonl"
+            good_path.write_text(
+                "# Good\n\n## Method\n\n"
+                "Readable GNSS method text for chunking and retrieval. "
+                "This paragraph is long enough to pass the minimal chunk length threshold and represent a useful parsed Markdown section.",
+                encoding="utf-8",
+            )
+            bad_path.write_text("# Bad\n\n## Body\n\nLow quality parsed text that should be skipped.", encoding="utf-8")
+            quality_records = [
+                {"source_file": str(good_path), "status": "pass", "score": 90, "reasons": []},
+                {"source_file": str(bad_path), "status": "fail", "score": 20, "reasons": ["document body is too short"]},
+            ]
+            quality_path.write_text("\n".join(json.dumps(record) for record in quality_records) + "\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/build_minimal_rag_chunks.py",
+                    "--output",
+                    str(output_path),
+                    "--report",
+                    str(report_path),
+                    "--quality-path",
+                    str(quality_path),
+                    "--exclude-low-quality",
+                    "--min-quality-score",
+                    "60",
+                    str(good_path),
+                    str(bad_path),
+                ],
+                cwd=PROJECT_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            records = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
+            self.assertTrue(records)
+            self.assertTrue(all(record["source_file"] != str(bad_path) for record in records))
+            self.assertIn("质量过滤", report_path.read_text(encoding="utf-8"))
+
     def test_run_skips_low_quality_markdown_when_filter_is_enabled(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
